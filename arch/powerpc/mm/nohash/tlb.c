@@ -34,6 +34,7 @@
 #include <linux/of_fdt.h>
 #include <linux/hugetlb.h>
 
+#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/tlb.h>
 #include <asm/code-patching.h>
@@ -82,16 +83,12 @@ struct mmu_psize_def mmu_psize_defs[MMU_PAGE_COUNT] = {
 };
 #elif defined(CONFIG_PPC_8xx)
 struct mmu_psize_def mmu_psize_defs[MMU_PAGE_COUNT] = {
-	/* we only manage 4k and 16k pages as normal pages */
-#ifdef CONFIG_PPC_4K_PAGES
 	[MMU_PAGE_4K] = {
 		.shift	= 12,
 	},
-#else
 	[MMU_PAGE_16K] = {
 		.shift	= 14,
 	},
-#endif
 	[MMU_PAGE_512K] = {
 		.shift	= 19,
 	},
@@ -630,7 +627,6 @@ static void early_init_this_mmu(void)
 #ifdef CONFIG_PPC_FSL_BOOK3E
 	if (mmu_has_feature(MMU_FTR_TYPE_FSL_E)) {
 		unsigned int num_cams;
-		int __maybe_unused cpu = smp_processor_id();
 		bool map = true;
 
 		/* use a quarter of the TLBCAM for bolted linear map */
@@ -704,6 +700,8 @@ static void __init early_init_mmu_global(void)
 	 * for use by the TLB miss code
 	 */
 	linear_map_top = memblock_end_of_DRAM();
+
+	ioremap_bot = IOREMAP_BASE;
 }
 
 static void __init early_mmu_set_memory_limit(void)

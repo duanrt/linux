@@ -5,6 +5,7 @@
 #define __HCLGE_ERR_H
 
 #include "hclge_main.h"
+#include "hnae3.h"
 
 #define HCLGE_MPF_RAS_INT_MIN_BD_NUM	10
 #define HCLGE_PF_RAS_INT_MIN_BD_NUM	4
@@ -15,7 +16,6 @@
 #define HCLGE_RAS_REG_NFE_MASK   0xFF00
 #define HCLGE_RAS_REG_ROCEE_ERR_MASK   0x3000000
 
-#define HCLGE_VECTOR0_PF_OTHER_INT_STS_REG   0x20800
 #define HCLGE_VECTOR0_REG_MSIX_MASK   0x1FF00
 
 #define HCLGE_IMP_TCM_ECC_ERR_INT_EN	0xFFFF0000

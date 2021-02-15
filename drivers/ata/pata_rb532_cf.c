@@ -140,7 +140,7 @@ static int rb532_pata_driver_probe(struct platform_device *pdev)
 	info->gpio_line = gpiod;
 	info->irq = irq;
 
-	info->iobase = devm_ioremap_nocache(&pdev->dev, res->start,
+	info->iobase = devm_ioremap(&pdev->dev, res->start,
 				resource_size(res));
 	if (!info->iobase)
 		return -ENOMEM;
@@ -158,7 +158,6 @@ static int rb532_pata_driver_probe(struct platform_device *pdev)
 static int rb532_pata_driver_remove(struct platform_device *pdev)
 {
 	struct ata_host *ah = platform_get_drvdata(pdev);
-	struct rb532_cf_info *info = ah->private_data;
 
 	ata_host_detach(ah);
 

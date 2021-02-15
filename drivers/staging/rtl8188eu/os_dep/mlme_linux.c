@@ -27,11 +27,6 @@ void rtw_os_indicate_connect(struct adapter *adapter)
 	netif_carrier_on(adapter->pnetdev);
 }
 
-void rtw_os_indicate_scan_done(struct adapter *padapter, bool aborted)
-{
-	indicate_wx_scan_complete_event(padapter);
-}
-
 static struct rt_pmkid_list backup_pmkid[NUM_PMKID_CACHE];
 
 void rtw_reset_securitypriv(struct adapter *adapter)
@@ -95,7 +90,7 @@ void rtw_report_sec_ie(struct adapter *adapter, u8 authmode, u8 *sec_ie)
 	RT_TRACE(_module_mlme_osdep_c_, _drv_info_,
 		 ("+%s, authmode=%d\n", __func__, authmode));
 	buff = NULL;
-	if (authmode == _WPA_IE_ID_) {
+	if (authmode == WLAN_EID_VENDOR_SPECIFIC) {
 		RT_TRACE(_module_mlme_osdep_c_, _drv_info_,
 			 ("%s, authmode=%d\n", __func__, authmode));
 		buff = rtw_malloc(IW_CUSTOM_MAX);

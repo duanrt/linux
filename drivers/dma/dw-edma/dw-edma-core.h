@@ -50,7 +50,7 @@ struct dw_edma_burst {
 
 struct dw_edma_region {
 	phys_addr_t			paddr;
-	dma_addr_t			vaddr;
+	void				__iomem *vaddr;
 	size_t				sz;
 };
 
@@ -101,6 +101,10 @@ struct dw_edma_irq {
 	u32				wr_mask;
 	u32				rd_mask;
 	struct dw_edma			*dw;
+};
+
+struct dw_edma_core_ops {
+	int	(*irq_vector)(struct device *dev, unsigned int nr);
 };
 
 struct dw_edma {

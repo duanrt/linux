@@ -430,10 +430,8 @@ static int imx_keypad_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no irq defined in platform data\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	input_dev = devm_input_allocate_device(&pdev->dev);
 	if (!input_dev) {
@@ -534,7 +532,7 @@ static int __maybe_unused imx_kbd_noirq_suspend(struct device *dev)
 	/* imx kbd can wake up system even clock is disabled */
 	mutex_lock(&input_dev->mutex);
 
-	if (input_dev->users)
+	if (input_device_enabled(input_dev))
 		clk_disable_unprepare(kbd->clk);
 
 	mutex_unlock(&input_dev->mutex);
@@ -564,7 +562,7 @@ static int __maybe_unused imx_kbd_noirq_resume(struct device *dev)
 
 	mutex_lock(&input_dev->mutex);
 
-	if (input_dev->users) {
+	if (input_device_enabled(input_dev)) {
 		ret = clk_prepare_enable(kbd->clk);
 		if (ret)
 			goto err_clk;

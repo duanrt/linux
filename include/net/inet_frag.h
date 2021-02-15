@@ -21,6 +21,7 @@ struct fqdir {
 	/* Keep atomic mem on separate cachelines in structs that include it */
 	atomic_long_t		mem ____cacheline_aligned_in_smp;
 	struct work_struct	destroy_work;
+	struct llist_node	free_list;
 };
 
 /**
@@ -171,7 +172,7 @@ int inet_frag_queue_insert(struct inet_frag_queue *q, struct sk_buff *skb,
 void *inet_frag_reasm_prepare(struct inet_frag_queue *q, struct sk_buff *skb,
 			      struct sk_buff *parent);
 void inet_frag_reasm_finish(struct inet_frag_queue *q, struct sk_buff *head,
-			    void *reasm_data);
+			    void *reasm_data, bool try_coalesce);
 struct sk_buff *inet_frag_pull_head(struct inet_frag_queue *q);
 
 #endif

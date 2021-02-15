@@ -212,10 +212,8 @@ static int lpc32xx_ts_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "Can't get interrupt resource\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	tsc = kzalloc(sizeof(*tsc), GFP_KERNEL);
 	input = input_allocate_device();
@@ -336,7 +334,7 @@ static int lpc32xx_ts_suspend(struct device *dev)
 	 */
 	mutex_lock(&input->mutex);
 
-	if (input->users) {
+	if (input_device_enabled(input)) {
 		if (device_may_wakeup(dev))
 			enable_irq_wake(tsc->irq);
 		else
@@ -355,7 +353,7 @@ static int lpc32xx_ts_resume(struct device *dev)
 
 	mutex_lock(&input->mutex);
 
-	if (input->users) {
+	if (input_device_enabled(input)) {
 		if (device_may_wakeup(dev))
 			disable_irq_wake(tsc->irq);
 		else

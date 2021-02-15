@@ -195,13 +195,13 @@ static int ee1004_probe(struct i2c_client *client,
 	mutex_lock(&ee1004_bus_lock);
 	if (++ee1004_dev_count == 1) {
 		for (cnr = 0; cnr < 2; cnr++) {
-			ee1004_set_page[cnr] = i2c_new_dummy(client->adapter,
+			ee1004_set_page[cnr] = i2c_new_dummy_device(client->adapter,
 						EE1004_ADDR_SET_PAGE + cnr);
-			if (!ee1004_set_page[cnr]) {
+			if (IS_ERR(ee1004_set_page[cnr])) {
 				dev_err(&client->dev,
 					"address 0x%02x unavailable\n",
 					EE1004_ADDR_SET_PAGE + cnr);
-				err = -EADDRINUSE;
+				err = PTR_ERR(ee1004_set_page[cnr]);
 				goto err_clients;
 			}
 		}
@@ -280,18 +280,7 @@ static struct i2c_driver ee1004_driver = {
 	.remove = ee1004_remove,
 	.id_table = ee1004_ids,
 };
-
-static int __init ee1004_init(void)
-{
-	return i2c_add_driver(&ee1004_driver);
-}
-module_init(ee1004_init);
-
-static void __exit ee1004_exit(void)
-{
-	i2c_del_driver(&ee1004_driver);
-}
-module_exit(ee1004_exit);
+module_i2c_driver(ee1004_driver);
 
 MODULE_DESCRIPTION("Driver for EE1004-compliant DDR4 SPD EEPROMs");
 MODULE_AUTHOR("Jean Delvare");

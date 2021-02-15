@@ -6,7 +6,10 @@
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/module.h>
 #include <linux/of_address.h>
+#include <linux/platform_device.h>
+
 #include <video/videomode.h>
 
 #include <drm/drm_atomic_helper.h>
@@ -17,7 +20,7 @@
 #include <drm/drm_of.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drmP.h>
+#include <drm/drm_vblank.h>
 
 #include "zx_common_regs.h"
 #include "zx_drm_drv.h"
@@ -347,7 +350,7 @@ static inline void vou_chn_set_update(struct zx_crtc *zcrtc)
 }
 
 static void zx_crtc_atomic_enable(struct drm_crtc *crtc,
-				  struct drm_crtc_state *old_state)
+				  struct drm_atomic_state *state)
 {
 	struct drm_display_mode *mode = &crtc->state->adjusted_mode;
 	bool interlaced = mode->flags & DRM_MODE_FLAG_INTERLACE;
@@ -452,7 +455,7 @@ static void zx_crtc_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void zx_crtc_atomic_disable(struct drm_crtc *crtc,
-				   struct drm_crtc_state *old_state)
+				   struct drm_atomic_state *state)
 {
 	struct zx_crtc *zcrtc = to_zx_crtc(crtc);
 	const struct zx_crtc_bits *bits = zcrtc->bits;
@@ -470,7 +473,7 @@ static void zx_crtc_atomic_disable(struct drm_crtc *crtc,
 }
 
 static void zx_crtc_atomic_flush(struct drm_crtc *crtc,
-				  struct drm_crtc_state *old_state)
+				  struct drm_atomic_state *state)
 {
 	struct drm_pending_vblank_event *event = crtc->state->event;
 

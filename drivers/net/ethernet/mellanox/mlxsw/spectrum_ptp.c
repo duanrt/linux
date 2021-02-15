@@ -29,7 +29,7 @@
 
 struct mlxsw_sp_ptp_state {
 	struct mlxsw_sp *mlxsw_sp;
-	struct rhashtable unmatched_ht;
+	struct rhltable unmatched_ht;
 	spinlock_t unmatched_lock; /* protects the HT */
 	struct delayed_work ht_gc_dw;
 	u32 gc_cycle;
@@ -45,7 +45,7 @@ struct mlxsw_sp1_ptp_key {
 
 struct mlxsw_sp1_ptp_unmatched {
 	struct mlxsw_sp1_ptp_key key;
-	struct rhash_head ht_node;
+	struct rhlist_head ht_node;
 	struct rcu_head rcu;
 	struct sk_buff *skb;
 	u64 timestamp;
@@ -314,11 +314,9 @@ static int mlxsw_sp_ptp_parse(struct sk_buff *skb,
 			      u8 *p_message_type,
 			      u16 *p_sequence_id)
 {
-	unsigned int offset = 0;
 	unsigned int ptp_class;
-	u8 *data;
+	struct ptp_header *hdr;
 
-	data = skb_mac_header(skb);
 	ptp_class = ptp_classify_raw(skb);
 
 	switch (ptp_class & PTP_CLASS_VMASK) {
@@ -329,37 +327,21 @@ static int mlxsw_sp_ptp_parse(struct sk_buff *skb,
 		return -ERANGE;
 	}
 
-	if (ptp_class & PTP_CLASS_VLAN)
-		offset += VLAN_HLEN;
-
-	switch (ptp_class & PTP_CLASS_PMASK) {
-	case PTP_CLASS_IPV4:
-		offset += ETH_HLEN + IPV4_HLEN(data + offset) + UDP_HLEN;
-		break;
-	case PTP_CLASS_IPV6:
-		offset += ETH_HLEN + IP6_HLEN + UDP_HLEN;
-		break;
-	case PTP_CLASS_L2:
-		offset += ETH_HLEN;
-		break;
-	default:
-		return -ERANGE;
-	}
-
-	/* PTP header is 34 bytes. */
-	if (skb->len < offset + 34)
+	hdr = ptp_parse_header(skb, ptp_class);
+	if (!hdr)
 		return -EINVAL;
 
-	*p_message_type = data[offset] & 0x0f;
-	*p_domain_number = data[offset + 4];
-	*p_sequence_id = (u16)(data[offset + 30]) << 8 | data[offset + 31];
+	*p_message_type	 = ptp_get_msgtype(hdr, ptp_class);
+	*p_domain_number = hdr->domain_number;
+	*p_sequence_id	 = be16_to_cpu(hdr->sequence_id);
+
 	return 0;
 }
 
 /* Returns NULL on successful insertion, a pointer on conflict, or an ERR_PTR on
  * error.
  */
-static struct mlxsw_sp1_ptp_unmatched *
+static int
 mlxsw_sp1_ptp_unmatched_save(struct mlxsw_sp *mlxsw_sp,
 			     struct mlxsw_sp1_ptp_key key,
 			     struct sk_buff *skb,
@@ -368,41 +350,51 @@ mlxsw_sp1_ptp_unmatched_save(struct mlxsw_sp *mlxsw_sp,
 	int cycles = MLXSW_SP1_PTP_HT_GC_TIMEOUT / MLXSW_SP1_PTP_HT_GC_INTERVAL;
 	struct mlxsw_sp_ptp_state *ptp_state = mlxsw_sp->ptp_state;
 	struct mlxsw_sp1_ptp_unmatched *unmatched;
-	struct mlxsw_sp1_ptp_unmatched *conflict;
+	int err;
 
 	unmatched = kzalloc(sizeof(*unmatched), GFP_ATOMIC);
 	if (!unmatched)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
 	unmatched->key = key;
 	unmatched->skb = skb;
 	unmatched->timestamp = timestamp;
 	unmatched->gc_cycle = mlxsw_sp->ptp_state->gc_cycle + cycles;
 
-	conflict = rhashtable_lookup_get_insert_fast(&ptp_state->unmatched_ht,
-					    &unmatched->ht_node,
-					    mlxsw_sp1_ptp_unmatched_ht_params);
-	if (conflict)
+	err = rhltable_insert(&ptp_state->unmatched_ht, &unmatched->ht_node,
+			      mlxsw_sp1_ptp_unmatched_ht_params);
+	if (err)
 		kfree(unmatched);
 
-	return conflict;
+	return err;
 }
 
 static struct mlxsw_sp1_ptp_unmatched *
 mlxsw_sp1_ptp_unmatched_lookup(struct mlxsw_sp *mlxsw_sp,
-			       struct mlxsw_sp1_ptp_key key)
+			       struct mlxsw_sp1_ptp_key key, int *p_length)
 {
-	return rhashtable_lookup(&mlxsw_sp->ptp_state->unmatched_ht, &key,
-				 mlxsw_sp1_ptp_unmatched_ht_params);
+	struct mlxsw_sp1_ptp_unmatched *unmatched, *last = NULL;
+	struct rhlist_head *tmp, *list;
+	int length = 0;
+
+	list = rhltable_lookup(&mlxsw_sp->ptp_state->unmatched_ht, &key,
+			       mlxsw_sp1_ptp_unmatched_ht_params);
+	rhl_for_each_entry_rcu(unmatched, tmp, list, ht_node) {
+		last = unmatched;
+		length++;
+	}
+
+	*p_length = length;
+	return last;
 }
 
 static int
 mlxsw_sp1_ptp_unmatched_remove(struct mlxsw_sp *mlxsw_sp,
 			       struct mlxsw_sp1_ptp_unmatched *unmatched)
 {
-	return rhashtable_remove_fast(&mlxsw_sp->ptp_state->unmatched_ht,
-				      &unmatched->ht_node,
-				      mlxsw_sp1_ptp_unmatched_ht_params);
+	return rhltable_remove(&mlxsw_sp->ptp_state->unmatched_ht,
+			       &unmatched->ht_node,
+			       mlxsw_sp1_ptp_unmatched_ht_params);
 }
 
 /* This function is called in the following scenarios:
@@ -489,75 +481,38 @@ static void mlxsw_sp1_ptp_got_piece(struct mlxsw_sp *mlxsw_sp,
 				    struct mlxsw_sp1_ptp_key key,
 				    struct sk_buff *skb, u64 timestamp)
 {
-	struct mlxsw_sp1_ptp_unmatched *unmatched, *conflict;
+	struct mlxsw_sp1_ptp_unmatched *unmatched;
+	int length;
 	int err;
 
 	rcu_read_lock();
 
-	unmatched = mlxsw_sp1_ptp_unmatched_lookup(mlxsw_sp, key);
-
 	spin_lock(&mlxsw_sp->ptp_state->unmatched_lock);
 
-	if (unmatched) {
-		/* There was an unmatched entry when we looked, but it may have
-		 * been removed before we took the lock.
-		 */
-		err = mlxsw_sp1_ptp_unmatched_remove(mlxsw_sp, unmatched);
-		if (err)
-			unmatched = NULL;
-	}
-
-	if (!unmatched) {
-		/* We have no unmatched entry, but one may have been added after
-		 * we looked, but before we took the lock.
-		 */
-		unmatched = mlxsw_sp1_ptp_unmatched_save(mlxsw_sp, key,
-							 skb, timestamp);
-		if (IS_ERR(unmatched)) {
-			if (skb)
-				mlxsw_sp1_ptp_packet_finish(mlxsw_sp, skb,
-							    key.local_port,
-							    key.ingress, NULL);
-			unmatched = NULL;
-		} else if (unmatched) {
-			/* Save just told us, under lock, that the entry is
-			 * there, so this has to work.
-			 */
-			err = mlxsw_sp1_ptp_unmatched_remove(mlxsw_sp,
-							     unmatched);
-			WARN_ON_ONCE(err);
-		}
-	}
-
-	/* If unmatched is non-NULL here, it comes either from the lookup, or
-	 * from the save attempt above. In either case the entry was removed
-	 * from the hash table. If unmatched is NULL, a new unmatched entry was
-	 * added to the hash table, and there was no conflict.
-	 */
-
+	unmatched = mlxsw_sp1_ptp_unmatched_lookup(mlxsw_sp, key, &length);
 	if (skb && unmatched && unmatched->timestamp) {
 		unmatched->skb = skb;
 	} else if (timestamp && unmatched && unmatched->skb) {
 		unmatched->timestamp = timestamp;
-	} else if (unmatched) {
-		/* unmatched holds an older entry of the same type: either an
-		 * skb if we are handling skb, or a timestamp if we are handling
-		 * timestamp. We can't match that up, so save what we have.
+	} else {
+		/* Either there is no entry to match, or one that is there is
+		 * incompatible.
 		 */
-		conflict = mlxsw_sp1_ptp_unmatched_save(mlxsw_sp, key,
-							skb, timestamp);
-		if (IS_ERR(conflict)) {
-			if (skb)
-				mlxsw_sp1_ptp_packet_finish(mlxsw_sp, skb,
-							    key.local_port,
-							    key.ingress, NULL);
-		} else {
-			/* Above, we removed an object with this key from the
-			 * hash table, under lock, so conflict can not be a
-			 * valid pointer.
-			 */
-			WARN_ON_ONCE(conflict);
-		}
+		if (length < 100)
+			err = mlxsw_sp1_ptp_unmatched_save(mlxsw_sp, key,
+							   skb, timestamp);
+		else
+			err = -E2BIG;
+		if (err && skb)
+			mlxsw_sp1_ptp_packet_finish(mlxsw_sp, skb,
+						    key.local_port,
+						    key.ingress, NULL);
+		unmatched = NULL;
+	}
+
+	if (unmatched) {
+		err = mlxsw_sp1_ptp_unmatched_remove(mlxsw_sp, unmatched);
+		WARN_ON_ONCE(err);
 	}
 
 	spin_unlock(&mlxsw_sp->ptp_state->unmatched_lock);
@@ -657,6 +612,8 @@ static void
 mlxsw_sp1_ptp_ht_gc_collect(struct mlxsw_sp_ptp_state *ptp_state,
 			    struct mlxsw_sp1_ptp_unmatched *unmatched)
 {
+	struct mlxsw_sp_ptp_port_dir_stats *stats;
+	struct mlxsw_sp_port *mlxsw_sp_port;
 	int err;
 
 	/* If an unmatched entry has an SKB, it has to be handed over to the
@@ -669,14 +626,24 @@ mlxsw_sp1_ptp_ht_gc_collect(struct mlxsw_sp_ptp_state *ptp_state,
 	local_bh_disable();
 
 	spin_lock(&ptp_state->unmatched_lock);
-	err = rhashtable_remove_fast(&ptp_state->unmatched_ht,
-				     &unmatched->ht_node,
-				     mlxsw_sp1_ptp_unmatched_ht_params);
+	err = rhltable_remove(&ptp_state->unmatched_ht, &unmatched->ht_node,
+			      mlxsw_sp1_ptp_unmatched_ht_params);
 	spin_unlock(&ptp_state->unmatched_lock);
 
 	if (err)
 		/* The packet was matched with timestamp during the walk. */
 		goto out;
+
+	mlxsw_sp_port = ptp_state->mlxsw_sp->ports[unmatched->key.local_port];
+	if (mlxsw_sp_port) {
+		stats = unmatched->key.ingress ?
+			&mlxsw_sp_port->ptp.stats.rx_gcd :
+			&mlxsw_sp_port->ptp.stats.tx_gcd;
+		if (unmatched->skb)
+			stats->packets++;
+		else
+			stats->timestamps++;
+	}
 
 	/* mlxsw_sp1_ptp_unmatched_finish() invokes netif_receive_skb(). While
 	 * the comment at that function states that it can only be called in
@@ -702,7 +669,7 @@ static void mlxsw_sp1_ptp_ht_gc(struct work_struct *work)
 	ptp_state = container_of(dwork, struct mlxsw_sp_ptp_state, ht_gc_dw);
 	gc_cycle = ptp_state->gc_cycle++;
 
-	rhashtable_walk_enter(&ptp_state->unmatched_ht, &iter);
+	rhltable_walk_enter(&ptp_state->unmatched_ht, &iter);
 	rhashtable_walk_start(&iter);
 	while ((obj = rhashtable_walk_next(&iter))) {
 		if (IS_ERR(obj))
@@ -855,16 +822,16 @@ struct mlxsw_sp_ptp_state *mlxsw_sp1_ptp_init(struct mlxsw_sp *mlxsw_sp)
 
 	spin_lock_init(&ptp_state->unmatched_lock);
 
-	err = rhashtable_init(&ptp_state->unmatched_ht,
-			      &mlxsw_sp1_ptp_unmatched_ht_params);
+	err = rhltable_init(&ptp_state->unmatched_ht,
+			    &mlxsw_sp1_ptp_unmatched_ht_params);
 	if (err)
 		goto err_hashtable_init;
 
 	/* Delive these message types as PTP0. */
-	message_type = BIT(MLXSW_SP_PTP_MESSAGE_TYPE_SYNC) |
-		       BIT(MLXSW_SP_PTP_MESSAGE_TYPE_DELAY_REQ) |
-		       BIT(MLXSW_SP_PTP_MESSAGE_TYPE_PDELAY_REQ) |
-		       BIT(MLXSW_SP_PTP_MESSAGE_TYPE_PDELAY_RESP);
+	message_type = BIT(PTP_MSGTYPE_SYNC) |
+		       BIT(PTP_MSGTYPE_DELAY_REQ) |
+		       BIT(PTP_MSGTYPE_PDELAY_REQ) |
+		       BIT(PTP_MSGTYPE_PDELAY_RESP);
 	err = mlxsw_sp_ptp_mtptpt_set(mlxsw_sp, MLXSW_REG_MTPTPT_TRAP_ID_PTP0,
 				      message_type);
 	if (err)
@@ -891,7 +858,7 @@ err_fifo_clr:
 err_mtptpt1_set:
 	mlxsw_sp_ptp_mtptpt_set(mlxsw_sp, MLXSW_REG_MTPTPT_TRAP_ID_PTP0, 0);
 err_mtptpt_set:
-	rhashtable_destroy(&ptp_state->unmatched_ht);
+	rhltable_destroy(&ptp_state->unmatched_ht);
 err_hashtable_init:
 	kfree(ptp_state);
 	return ERR_PTR(err);
@@ -906,8 +873,8 @@ void mlxsw_sp1_ptp_fini(struct mlxsw_sp_ptp_state *ptp_state)
 	mlxsw_sp1_ptp_set_fifo_clr_on_trap(mlxsw_sp, false);
 	mlxsw_sp_ptp_mtptpt_set(mlxsw_sp, MLXSW_REG_MTPTPT_TRAP_ID_PTP1, 0);
 	mlxsw_sp_ptp_mtptpt_set(mlxsw_sp, MLXSW_REG_MTPTPT_TRAP_ID_PTP0, 0);
-	rhashtable_free_and_destroy(&ptp_state->unmatched_ht,
-				    &mlxsw_sp1_ptp_unmatched_free_fn, NULL);
+	rhltable_free_and_destroy(&ptp_state->unmatched_ht,
+				  &mlxsw_sp1_ptp_unmatched_free_fn, NULL);
 	kfree(ptp_state);
 }
 
@@ -935,7 +902,10 @@ static int mlxsw_sp_ptp_get_message_types(const struct hwtstamp_config *config,
 		egr_types = 0xff;
 		break;
 	case HWTSTAMP_TX_ONESTEP_SYNC:
+	case HWTSTAMP_TX_ONESTEP_P2P:
 		return -ERANGE;
+	default:
+		return -EINVAL;
 	}
 
 	switch (rx_filter) {
@@ -966,6 +936,8 @@ static int mlxsw_sp_ptp_get_message_types(const struct hwtstamp_config *config,
 	case HWTSTAMP_FILTER_SOME:
 	case HWTSTAMP_FILTER_NTP_ALL:
 		return -ERANGE;
+	default:
+		return -EINVAL;
 	}
 
 	*p_ing_types = ing_types;
@@ -979,6 +951,9 @@ static int mlxsw_sp1_ptp_mtpppc_update(struct mlxsw_sp_port *mlxsw_sp_port,
 {
 	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
 	struct mlxsw_sp_port *tmp;
+	u16 orig_ing_types = 0;
+	u16 orig_egr_types = 0;
+	int err;
 	int i;
 
 	/* MTPPPC configures timestamping globally, not per port. Find the
@@ -986,11 +961,25 @@ static int mlxsw_sp1_ptp_mtpppc_update(struct mlxsw_sp_port *mlxsw_sp_port,
 	 */
 	for (i = 1; i < mlxsw_core_max_ports(mlxsw_sp->core); i++) {
 		tmp = mlxsw_sp->ports[i];
+		if (tmp) {
+			orig_ing_types |= tmp->ptp.ing_types;
+			orig_egr_types |= tmp->ptp.egr_types;
+		}
 		if (tmp && tmp != mlxsw_sp_port) {
 			ing_types |= tmp->ptp.ing_types;
 			egr_types |= tmp->ptp.egr_types;
 		}
 	}
+
+	if ((ing_types || egr_types) && !(orig_ing_types || orig_egr_types)) {
+		err = mlxsw_sp_nve_inc_parsing_depth_get(mlxsw_sp);
+		if (err) {
+			netdev_err(mlxsw_sp_port->dev, "Failed to increase parsing depth");
+			return err;
+		}
+	}
+	if (!(ing_types || egr_types) && (orig_ing_types || orig_egr_types))
+		mlxsw_sp_nve_inc_parsing_depth_put(mlxsw_sp);
 
 	return mlxsw_sp1_ptp_mtpppc_set(mlxsw_sp_port->mlxsw_sp,
 				       ing_types, egr_types);
@@ -1013,27 +1002,17 @@ mlxsw_sp1_ptp_port_shaper_set(struct mlxsw_sp_port *mlxsw_sp_port, bool enable)
 
 static int mlxsw_sp1_ptp_port_shaper_check(struct mlxsw_sp_port *mlxsw_sp_port)
 {
-	const struct mlxsw_sp_port_type_speed_ops *port_type_speed_ops;
-	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
-	char ptys_pl[MLXSW_REG_PTYS_LEN];
-	u32 eth_proto_oper, speed;
 	bool ptps = false;
 	int err, i;
+	u32 speed;
 
 	if (!mlxsw_sp1_ptp_hwtstamp_enabled(mlxsw_sp_port))
 		return mlxsw_sp1_ptp_port_shaper_set(mlxsw_sp_port, false);
 
-	port_type_speed_ops = mlxsw_sp->port_type_speed_ops;
-	port_type_speed_ops->reg_ptys_eth_pack(mlxsw_sp, ptys_pl,
-					       mlxsw_sp_port->local_port, 0,
-					       false);
-	err = mlxsw_reg_query(mlxsw_sp->core, MLXSW_REG(ptys), ptys_pl);
+	err = mlxsw_sp_port_speed_get(mlxsw_sp_port, &speed);
 	if (err)
 		return err;
-	port_type_speed_ops->reg_ptys_eth_unpack(mlxsw_sp, ptys_pl, NULL, NULL,
-						 &eth_proto_oper);
 
-	speed = port_type_speed_ops->from_ptys_speed(mlxsw_sp, eth_proto_oper);
 	for (i = 0; i < MLXSW_SP1_PTP_SHAPER_PARAMS_LEN; i++) {
 		if (mlxsw_sp1_ptp_shaper_params[i].ethtool_speed == speed) {
 			ptps = true;
@@ -1108,4 +1087,58 @@ int mlxsw_sp1_ptp_get_ts_info(struct mlxsw_sp *mlxsw_sp,
 			   BIT(HWTSTAMP_FILTER_ALL);
 
 	return 0;
+}
+
+struct mlxsw_sp_ptp_port_stat {
+	char str[ETH_GSTRING_LEN];
+	ptrdiff_t offset;
+};
+
+#define MLXSW_SP_PTP_PORT_STAT(NAME, FIELD)				\
+	{								\
+		.str = NAME,						\
+		.offset = offsetof(struct mlxsw_sp_ptp_port_stats,	\
+				    FIELD),				\
+	}
+
+static const struct mlxsw_sp_ptp_port_stat mlxsw_sp_ptp_port_stats[] = {
+	MLXSW_SP_PTP_PORT_STAT("ptp_rx_gcd_packets",    rx_gcd.packets),
+	MLXSW_SP_PTP_PORT_STAT("ptp_rx_gcd_timestamps", rx_gcd.timestamps),
+	MLXSW_SP_PTP_PORT_STAT("ptp_tx_gcd_packets",    tx_gcd.packets),
+	MLXSW_SP_PTP_PORT_STAT("ptp_tx_gcd_timestamps", tx_gcd.timestamps),
+};
+
+#undef MLXSW_SP_PTP_PORT_STAT
+
+#define MLXSW_SP_PTP_PORT_STATS_LEN \
+	ARRAY_SIZE(mlxsw_sp_ptp_port_stats)
+
+int mlxsw_sp1_get_stats_count(void)
+{
+	return MLXSW_SP_PTP_PORT_STATS_LEN;
+}
+
+void mlxsw_sp1_get_stats_strings(u8 **p)
+{
+	int i;
+
+	for (i = 0; i < MLXSW_SP_PTP_PORT_STATS_LEN; i++) {
+		memcpy(*p, mlxsw_sp_ptp_port_stats[i].str,
+		       ETH_GSTRING_LEN);
+		*p += ETH_GSTRING_LEN;
+	}
+}
+
+void mlxsw_sp1_get_stats(struct mlxsw_sp_port *mlxsw_sp_port,
+			 u64 *data, int data_index)
+{
+	void *stats = &mlxsw_sp_port->ptp.stats;
+	ptrdiff_t offset;
+	int i;
+
+	data += data_index;
+	for (i = 0; i < MLXSW_SP_PTP_PORT_STATS_LEN; i++) {
+		offset = mlxsw_sp_ptp_port_stats[i].offset;
+		*data++ = *(u64 *)(stats + offset);
+	}
 }

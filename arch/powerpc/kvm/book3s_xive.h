@@ -135,6 +135,9 @@ struct kvmppc_xive {
 	/* Flags */
 	u8	single_escalation;
 
+	/* Number of entries in the VP block */
+	u32	nr_servers;
+
 	struct kvmppc_xive_ops *ops;
 	struct address_space   *mapping;
 	struct mutex mapping_lock;
@@ -215,9 +218,32 @@ static inline struct kvmppc_xive_src_block *kvmppc_xive_find_source(struct kvmpp
 	return xive->src_blocks[bid];
 }
 
+/*
+ * When the XIVE resources are allocated at the HW level, the VP
+ * structures describing the vCPUs of a guest are distributed among
+ * the chips to optimize the PowerBUS usage. For best performance, the
+ * guest vCPUs can be pinned to match the VP structure distribution.
+ *
+ * Currently, the VP identifiers are deduced from the vCPU id using
+ * the kvmppc_pack_vcpu_id() routine which is not incorrect but not
+ * optimal either. It VSMT is used, the result is not continuous and
+ * the constraints on HW resources described above can not be met.
+ */
 static inline u32 kvmppc_xive_vp(struct kvmppc_xive *xive, u32 server)
 {
 	return xive->vp_base + kvmppc_pack_vcpu_id(xive->kvm, server);
+}
+
+static inline bool kvmppc_xive_vp_in_use(struct kvm *kvm, u32 vp_id)
+{
+	struct kvm_vcpu *vcpu = NULL;
+	int i;
+
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		if (vcpu->arch.xive_vcpu && vp_id == vcpu->arch.xive_vcpu->vp_id)
+			return true;
+	}
+	return false;
 }
 
 /*
@@ -275,6 +301,8 @@ extern int (*__xive_vm_h_eoi)(struct kvm_vcpu *vcpu, unsigned long xirr);
  */
 void kvmppc_xive_disable_vcpu_interrupts(struct kvm_vcpu *vcpu);
 int kvmppc_xive_debug_show_queues(struct seq_file *m, struct kvm_vcpu *vcpu);
+void kvmppc_xive_debug_show_sources(struct seq_file *m,
+				    struct kvmppc_xive_src_block *sb);
 struct kvmppc_xive_src_block *kvmppc_xive_create_src_block(
 	struct kvmppc_xive *xive, int irq);
 void kvmppc_xive_free_sources(struct kvmppc_xive_src_block *sb);
@@ -282,6 +310,10 @@ int kvmppc_xive_select_target(struct kvm *kvm, u32 *server, u8 prio);
 int kvmppc_xive_attach_escalation(struct kvm_vcpu *vcpu, u8 prio,
 				  bool single_escalation);
 struct kvmppc_xive *kvmppc_xive_get_device(struct kvm *kvm, u32 type);
+void xive_cleanup_single_escalation(struct kvm_vcpu *vcpu,
+				    struct kvmppc_xive_vcpu *xc, int irq);
+int kvmppc_xive_compute_vp_id(struct kvmppc_xive *xive, u32 cpu, u32 *vp);
+int kvmppc_xive_set_nr_servers(struct kvmppc_xive *xive, u64 addr);
 
 #endif /* CONFIG_KVM_XICS */
 #endif /* _KVM_PPC_BOOK3S_XICS_H */

@@ -38,9 +38,10 @@ static int siw_rx_umem(struct siw_rx_stream *srx, struct siw_umem *umem,
 
 		p = siw_get_upage(umem, dest_addr);
 		if (unlikely(!p)) {
-			pr_warn("siw: %s: [QP %u]: bogus addr: %p, %p\n",
+			pr_warn("siw: %s: [QP %u]: bogus addr: %pK, %pK\n",
 				__func__, qp_id(rx_qp(srx)),
-				(void *)dest_addr, (void *)umem->fp_addr);
+				(void *)(uintptr_t)dest_addr,
+				(void *)(uintptr_t)umem->fp_addr);
 			/* siw internal error */
 			srx->skb_copied += copied;
 			srx->skb_new -= copied;
@@ -50,7 +51,7 @@ static int siw_rx_umem(struct siw_rx_stream *srx, struct siw_umem *umem,
 		pg_off = dest_addr & ~PAGE_MASK;
 		bytes = min(len, (int)PAGE_SIZE - pg_off);
 
-		siw_dbg_qp(rx_qp(srx), "page %p, bytes=%u\n", p, bytes);
+		siw_dbg_qp(rx_qp(srx), "page %pK, bytes=%u\n", p, bytes);
 
 		dest = kmap_atomic(p);
 		rv = skb_copy_bits(srx->skb, srx->skb_offset, dest + pg_off,
@@ -67,7 +68,7 @@ static int siw_rx_umem(struct siw_rx_stream *srx, struct siw_umem *umem,
 			return -EFAULT;
 		}
 		if (srx->mpa_crc_hd) {
-			if (rx_qp(srx)->kernel_verbs) {
+			if (rdma_is_kernel_res(&rx_qp(srx)->base_qp.res)) {
 				crypto_shash_update(srx->mpa_crc_hd,
 					(u8 *)(dest + pg_off), bytes);
 				kunmap_atomic(dest);
@@ -104,11 +105,11 @@ static int siw_rx_kva(struct siw_rx_stream *srx, void *kva, int len)
 {
 	int rv;
 
-	siw_dbg_qp(rx_qp(srx), "kva: 0x%p, len: %u\n", kva, len);
+	siw_dbg_qp(rx_qp(srx), "kva: 0x%pK, len: %u\n", kva, len);
 
 	rv = skb_copy_bits(srx->skb, srx->skb_offset, kva, len);
 	if (unlikely(rv)) {
-		pr_warn("siw: [QP %u]: %s, len %d, kva 0x%p, rv %d\n",
+		pr_warn("siw: [QP %u]: %s, len %d, kva 0x%pK, rv %d\n",
 			qp_id(rx_qp(srx)), __func__, len, kva, rv);
 
 		return rv;
@@ -132,13 +133,14 @@ static int siw_rx_pbl(struct siw_rx_stream *srx, int *pbl_idx,
 
 	while (len) {
 		int bytes;
-		u64 buf_addr =
+		dma_addr_t buf_addr =
 			siw_pbl_get_buffer(pbl, offset, &bytes, pbl_idx);
 		if (!buf_addr)
 			break;
 
 		bytes = min(bytes, len);
-		if (siw_rx_kva(srx, (void *)buf_addr, bytes) == bytes) {
+		if (siw_rx_kva(srx, (void *)(uintptr_t)buf_addr, bytes) ==
+		    bytes) {
 			copied += bytes;
 			offset += bytes;
 			len -= bytes;
@@ -387,7 +389,7 @@ static struct siw_wqe *siw_rqe_get(struct siw_qp *qp)
 				struct siw_rqe *rqe2 = &srq->recvq[off];
 
 				if (!(rqe2->flags & SIW_WQE_VALID)) {
-					srq->armed = 0;
+					srq->armed = false;
 					srq_event = true;
 				}
 			}
@@ -485,8 +487,8 @@ int siw_proc_send(struct siw_qp *qp)
 		mem_p = *mem;
 		if (mem_p->mem_obj == NULL)
 			rv = siw_rx_kva(srx,
-					(void *)(sge->laddr + frx->sge_off),
-					sge_bytes);
+				(void *)(uintptr_t)(sge->laddr + frx->sge_off),
+				sge_bytes);
 		else if (!mem_p->is_pbl)
 			rv = siw_rx_umem(srx, mem_p->umem,
 					 sge->laddr + frx->sge_off, sge_bytes);
@@ -598,8 +600,8 @@ int siw_proc_write(struct siw_qp *qp)
 
 	if (mem->mem_obj == NULL)
 		rv = siw_rx_kva(srx,
-				(void *)(srx->ddp_to + srx->fpdu_part_rcvd),
-				bytes);
+			(void *)(uintptr_t)(srx->ddp_to + srx->fpdu_part_rcvd),
+			bytes);
 	else if (!mem->is_pbl)
 		rv = siw_rx_umem(srx, mem->umem,
 				 srx->ddp_to + srx->fpdu_part_rcvd, bytes);
@@ -841,8 +843,9 @@ int siw_proc_rresp(struct siw_qp *qp)
 	bytes = min(srx->fpdu_part_rem, srx->skb_new);
 
 	if (mem_p->mem_obj == NULL)
-		rv = siw_rx_kva(srx, (void *)(sge->laddr + wqe->processed),
-				bytes);
+		rv = siw_rx_kva(srx,
+			(void *)(uintptr_t)(sge->laddr + wqe->processed),
+			bytes);
 	else if (!mem_p->is_pbl)
 		rv = siw_rx_umem(srx, mem_p->umem, sge->laddr + wqe->processed,
 				 bytes);
@@ -1212,7 +1215,7 @@ static int siw_rdmap_complete(struct siw_qp *qp, int error)
 	case RDMAP_SEND_SE:
 	case RDMAP_SEND_SE_INVAL:
 		wqe->rqe.flags |= SIW_WQE_SOLICITED;
-		/* Fall through */
+		fallthrough;
 
 	case RDMAP_SEND:
 	case RDMAP_SEND_INVAL:
@@ -1262,7 +1265,7 @@ static int siw_rdmap_complete(struct siw_qp *qp, int error)
 
 			if (wc_status == SIW_WC_SUCCESS)
 				wc_status = SIW_WC_GENERAL_ERR;
-		} else if (qp->kernel_verbs &&
+		} else if (rdma_is_kernel_res(&qp->base_qp.res) &&
 			   rx_type(wqe) == SIW_OP_READ_LOCAL_INV) {
 			/*
 			 * Handle any STag invalidation request
@@ -1383,7 +1386,7 @@ int siw_tcp_rx_data(read_descriptor_t *rd_desc, struct sk_buff *skb,
 			 * DDP segment.
 			 */
 			qp->rx_fpdu->first_ddp_seg = 0;
-			/* Fall through */
+			fallthrough;
 
 		case SIW_GET_DATA_START:
 			/*

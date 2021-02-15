@@ -84,10 +84,10 @@ xfs_bulkstat_one_int(
 	/* xfs_iget returns the following without needing
 	 * further change.
 	 */
-	buf->bs_projectid = xfs_get_projid(ip);
+	buf->bs_projectid = ip->i_d.di_projid;
 	buf->bs_ino = ino;
-	buf->bs_uid = dic->di_uid;
-	buf->bs_gid = dic->di_gid;
+	buf->bs_uid = i_uid_read(inode);
+	buf->bs_gid = i_gid_read(inode);
 	buf->bs_size = dic->di_size;
 
 	buf->bs_nlink = inode->i_nlink;
@@ -97,25 +97,25 @@ xfs_bulkstat_one_int(
 	buf->bs_mtime_nsec = inode->i_mtime.tv_nsec;
 	buf->bs_ctime = inode->i_ctime.tv_sec;
 	buf->bs_ctime_nsec = inode->i_ctime.tv_nsec;
-	buf->bs_btime = dic->di_crtime.t_sec;
-	buf->bs_btime_nsec = dic->di_crtime.t_nsec;
+	buf->bs_btime = dic->di_crtime.tv_sec;
+	buf->bs_btime_nsec = dic->di_crtime.tv_nsec;
 	buf->bs_gen = inode->i_generation;
 	buf->bs_mode = inode->i_mode;
 
 	buf->bs_xflags = xfs_ip2xflags(ip);
 	buf->bs_extsize_blks = dic->di_extsize;
-	buf->bs_extents = dic->di_nextents;
+	buf->bs_extents = xfs_ifork_nextents(&ip->i_df);
 	xfs_bulkstat_health(ip, buf);
-	buf->bs_aextents = dic->di_anextents;
+	buf->bs_aextents = xfs_ifork_nextents(ip->i_afp);
 	buf->bs_forkoff = XFS_IFORK_BOFF(ip);
 	buf->bs_version = XFS_BULKSTAT_VERSION_V5;
 
-	if (dic->di_version == 3) {
+	if (xfs_sb_version_has_v3inode(&mp->m_sb)) {
 		if (dic->di_flags2 & XFS_DIFLAG2_COWEXTSIZE)
 			buf->bs_cowextsize_blks = dic->di_cowextsize;
 	}
 
-	switch (dic->di_format) {
+	switch (ip->i_df.if_format) {
 	case XFS_DINODE_FMT_DEV:
 		buf->bs_rdev = sysv_encode_dev(inode->i_rdev);
 		buf->bs_blksize = BLKDEV_IOSIZE;
@@ -137,7 +137,7 @@ xfs_bulkstat_one_int(
 	xfs_irele(ip);
 
 	error = bc->formatter(bc->breq, buf);
-	if (error == XFS_IBULK_ABORT)
+	if (error == -ECANCELED)
 		goto out_advance;
 	if (error)
 		goto out;
@@ -169,7 +169,7 @@ xfs_bulkstat_one(
 	ASSERT(breq->icount == 1);
 
 	bc.buf = kmem_zalloc(sizeof(struct xfs_bulkstat),
-			KM_SLEEP | KM_MAYFAIL);
+			KM_MAYFAIL);
 	if (!bc.buf)
 		return -ENOMEM;
 
@@ -181,7 +181,7 @@ xfs_bulkstat_one(
 	 * If we reported one inode to userspace then we abort because we hit
 	 * the end of the buffer.  Don't leak that back to userspace.
 	 */
-	if (error == XFS_IWALK_ABORT)
+	if (error == -ECANCELED)
 		error = 0;
 
 	return error;
@@ -243,7 +243,7 @@ xfs_bulkstat(
 		return 0;
 
 	bc.buf = kmem_zalloc(sizeof(struct xfs_bulkstat),
-			KM_SLEEP | KM_MAYFAIL);
+			KM_MAYFAIL);
 	if (!bc.buf)
 		return -ENOMEM;
 
@@ -272,6 +272,7 @@ xfs_bulkstat_to_bstat(
 	struct xfs_bstat		*bs1,
 	const struct xfs_bulkstat	*bstat)
 {
+	/* memset is needed here because of padding holes in the structure. */
 	memset(bs1, 0, sizeof(struct xfs_bstat));
 	bs1->bs_ino = bstat->bs_ino;
 	bs1->bs_mode = bstat->bs_mode;
@@ -341,7 +342,7 @@ xfs_inumbers_walk(
 	int			error;
 
 	error = ic->formatter(ic->breq, &inogrp);
-	if (error && error != XFS_IBULK_ABORT)
+	if (error && error != -ECANCELED)
 		return error;
 
 	ic->breq->startino = XFS_AGINO_TO_INO(mp, agno, irec->ir_startino) +
@@ -388,6 +389,8 @@ xfs_inumbers_to_inogrp(
 	struct xfs_inogrp		*ig1,
 	const struct xfs_inumbers	*ig)
 {
+	/* memset is needed here because of padding holes in the structure. */
+	memset(ig1, 0, sizeof(struct xfs_inogrp));
 	ig1->xi_startino = ig->xi_startino;
 	ig1->xi_alloccount = ig->xi_alloccount;
 	ig1->xi_allocmask = ig->xi_allocmask;

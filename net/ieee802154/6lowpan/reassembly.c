@@ -170,7 +170,7 @@ static int lowpan_frag_reasm(struct lowpan_frag_queue *fq, struct sk_buff *skb,
 	reasm_data = inet_frag_reasm_prepare(&fq->q, skb, prev_tail);
 	if (!reasm_data)
 		goto out_oom;
-	inet_frag_reasm_finish(&fq->q, skb, reasm_data);
+	inet_frag_reasm_finish(&fq->q, skb, reasm_data, false);
 
 	skb->dev = ldev;
 	skb->tstamp = fq->q.stamp;
@@ -195,7 +195,7 @@ static int lowpan_frag_rx_handlers_result(struct sk_buff *skb,
 		net_warn_ratelimited("%s: received unknown dispatch\n",
 				     __func__);
 
-		/* fall-through */
+		fallthrough;
 	default:
 		/* all others failure */
 		return NET_RX_DROP;

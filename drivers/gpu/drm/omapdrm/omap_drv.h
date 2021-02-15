@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2011 Texas Instruments Incorporated - https://www.ti.com/
  * Author: Rob Clark <rob@ti.com>
  */
 
@@ -11,11 +11,10 @@
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
-#include <drm/drmP.h>
+#include "dss/omapdss.h"
+
 #include <drm/drm_gem.h>
 #include <drm/omap_drm.h>
-
-#include "dss/omapdss.h"
 
 #include "omap_connector.h"
 #include "omap_crtc.h"
@@ -83,6 +82,6 @@ struct omap_drm_private {
 };
 
 
-int omap_debugfs_init(struct drm_minor *minor);
+void omap_debugfs_init(struct drm_minor *minor);
 
 #endif /* __OMAPDRM_DRV_H__ */

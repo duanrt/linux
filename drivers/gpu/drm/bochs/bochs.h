@@ -1,18 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+
 #include <linux/io.h>
 #include <linux/console.h>
 
-#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_encoder.h>
 #include <drm/drm_fb_helper.h>
-#include <drm/drm_simple_kms_helper.h>
-
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_vram_helper.h>
-
-#include <drm/drm_vram_mm_helper.h>
+#include <drm/drm_simple_kms_helper.h>
 
 /* ---------------------------------------------------------------------- */
 
@@ -95,7 +92,6 @@ void bochs_mm_fini(struct bochs_device *bochs);
 
 /* bochs_kms.c */
 int bochs_kms_init(struct bochs_device *bochs);
-void bochs_kms_fini(struct bochs_device *bochs);
 
 /* bochs_fbdev.c */
 extern const struct drm_mode_config_funcs bochs_mode_funcs;

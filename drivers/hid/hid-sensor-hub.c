@@ -483,7 +483,8 @@ static int sensor_hub_raw_event(struct hid_device *hdev,
 		return 1;
 
 	ptr = raw_data;
-	ptr++; /* Skip report id */
+	if (report->id)
+		ptr++; /* Skip report id */
 
 	spin_lock_irqsave(&pdata->lock, flags);
 
@@ -742,7 +743,6 @@ static void sensor_hub_remove(struct hid_device *hdev)
 	}
 	spin_unlock_irqrestore(&data->lock, flags);
 	mfd_remove_devices(&hdev->dev);
-	hid_set_drvdata(hdev, NULL);
 	mutex_destroy(&data->mutex);
 }
 

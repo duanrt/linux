@@ -124,12 +124,9 @@ static int ds1672_probe(struct i2c_client *client,
 	rtc->ops = &ds1672_rtc_ops;
 	rtc->range_max = U32_MAX;
 
-	err = rtc_register_device(rtc);
+	err = devm_rtc_register_device(rtc);
 	if (err)
 		return err;
-
-	if (IS_ERR(rtc))
-		return PTR_ERR(rtc);
 
 	i2c_set_clientdata(client, rtc);
 

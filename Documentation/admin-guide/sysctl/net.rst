@@ -39,7 +39,6 @@ Table : Subdirectories in /proc/sys/net
  802       E802 protocol         ax25       AX25
  ethernet  Ethernet protocol     rose       X.25 PLP layer
  ipv4      IP version 4          x25        X.25 protocol
- ipx       IPX                   token-ring IBM token ring
  bridge    Bridging              decnet     DEC net
  ipv6      IP version 6          tipc       TIPC
  ========= =================== = ========== ==================
@@ -68,7 +67,8 @@ two flavors of JITs, the newer eBPF JIT currently supported on:
   - sparc64
   - mips64
   - s390x
-  - riscv
+  - riscv64
+  - riscv32
 
 And the older cBPF JIT supported on the following archs:
 
@@ -321,11 +321,20 @@ fb_tunnels_only_for_init_net
 ----------------------------
 
 Controls if fallback tunnels (like tunl0, gre0, gretap0, erspan0,
-sit0, ip6tnl0, ip6gre0) are automatically created when a new
-network namespace is created, if corresponding tunnel is present
-in initial network namespace.
-If set to 1, these devices are not automatically created, and
-user space is responsible for creating them if needed.
+sit0, ip6tnl0, ip6gre0) are automatically created. There are 3 possibilities
+(a) value = 0; respective fallback tunnels are created when module is
+loaded in every net namespaces (backward compatible behavior).
+(b) value = 1; [kcmd value: initns] respective fallback tunnels are
+created only in init net namespace and every other net namespace will
+not have them.
+(c) value = 2; [kcmd value: none] fallback tunnels are not created
+when a module is loaded in any of the net namespace. Setting value to
+"2" is pointless after boot if these modules are built-in, so there is
+a kernel command-line option that can change this default. Please refer to
+Documentation/admin-guide/kernel-parameters.txt for additional details.
+
+Not creating fallback tunnels gives control to userspace to create
+whatever is needed only and avoid creating devices which are redundant.
 
 Default : 0  (for compatibility reasons)
 
@@ -339,7 +348,9 @@ settings from init_net and for IPv6 we reset all settings to default.
 
 If set to 1, both IPv4 and IPv6 settings are forced to inherit from
 current ones in init_net. If set to 2, both IPv4 and IPv6 settings are
-forced to reset to their default values.
+forced to reset to their default values. If set to 3, both IPv4 and IPv6
+settings are forced to inherit from current ones in the netns where this
+new netns has been created.
 
 Default : 0  (for compatibility reasons)
 
@@ -353,8 +364,8 @@ socket's buffer. It will not take effect unless PF_UNIX flag is specified.
 
 3. /proc/sys/net/ipv4 - IPV4 settings
 -------------------------------------
-Please see: Documentation/networking/ip-sysctl.txt and ipvs-sysctl.txt for
-descriptions of these entries.
+Please see: Documentation/networking/ip-sysctl.rst and
+Documentation/admin-guide/sysctl/net.rst for descriptions of these entries.
 
 
 4. Appletalk
@@ -401,33 +412,7 @@ interface.
 (network) that the route leads to, the router (may be directly connected), the
 route flags, and the device the route is using.
 
-
-5. IPX
-------
-
-The IPX protocol has no tunable values in proc/sys/net.
-
-The IPX  protocol  does,  however,  provide  proc/net/ipx. This lists each IPX
-socket giving  the  local  and  remote  addresses  in  Novell  format (that is
-network:node:port). In  accordance  with  the  strange  Novell  tradition,
-everything but the port is in hex. Not_Connected is displayed for sockets that
-are not  tied to a specific remote address. The Tx and Rx queue sizes indicate
-the number  of  bytes  pending  for  transmission  and  reception.  The  state
-indicates the  state  the  socket  is  in and the uid is the owning uid of the
-socket.
-
-The /proc/net/ipx_interface  file lists all IPX interfaces. For each interface
-it gives  the network number, the node number, and indicates if the network is
-the primary  network.  It  also  indicates  which  device  it  is bound to (or
-Internal for  internal  networks)  and  the  Frame  Type if appropriate. Linux
-supports 802.3,  802.2,  802.2  SNAP  and DIX (Blue Book) ethernet framing for
-IPX.
-
-The /proc/net/ipx_route  table  holds  a list of IPX routes. For each route it
-gives the  destination  network, the router node (or Directly) and the network
-address of the router (or Connected) for internal networks.
-
-6. TIPC
+5. TIPC
 -------
 
 tipc_rmem

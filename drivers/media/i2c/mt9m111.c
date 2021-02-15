@@ -533,7 +533,7 @@ static int mt9m111_get_fmt(struct v4l2_subdev *sd,
 		format->format = *mf;
 		return 0;
 #else
-		return -ENOTTY;
+		return -EINVAL;
 #endif
 	}
 
@@ -1137,8 +1137,9 @@ static int mt9m111_init_cfg(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int mt9m111_g_mbus_config(struct v4l2_subdev *sd,
-				struct v4l2_mbus_config *cfg)
+static int mt9m111_get_mbus_config(struct v4l2_subdev *sd,
+				   unsigned int pad,
+				   struct v4l2_mbus_config *cfg)
 {
 	struct mt9m111 *mt9m111 = container_of(sd, struct mt9m111, subdev);
 
@@ -1155,7 +1156,6 @@ static int mt9m111_g_mbus_config(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_video_ops mt9m111_subdev_video_ops = {
-	.g_mbus_config	= mt9m111_g_mbus_config,
 	.s_stream	= mt9m111_s_stream,
 	.g_frame_interval = mt9m111_g_frame_interval,
 	.s_frame_interval = mt9m111_s_frame_interval,
@@ -1168,6 +1168,7 @@ static const struct v4l2_subdev_pad_ops mt9m111_subdev_pad_ops = {
 	.set_selection	= mt9m111_set_selection,
 	.get_fmt	= mt9m111_get_fmt,
 	.set_fmt	= mt9m111_set_fmt,
+	.get_mbus_config = mt9m111_get_mbus_config,
 };
 
 static const struct v4l2_subdev_ops mt9m111_subdev_ops = {
@@ -1243,8 +1244,7 @@ out_put_fw:
 	return ret;
 }
 
-static int mt9m111_probe(struct i2c_client *client,
-			 const struct i2c_device_id *did)
+static int mt9m111_probe(struct i2c_client *client)
 {
 	struct mt9m111 *mt9m111;
 	struct i2c_adapter *adapter = client->adapter;
@@ -1388,7 +1388,7 @@ static struct i2c_driver mt9m111_i2c_driver = {
 		.name = "mt9m111",
 		.of_match_table = of_match_ptr(mt9m111_of_match),
 	},
-	.probe		= mt9m111_probe,
+	.probe_new	= mt9m111_probe,
 	.remove		= mt9m111_remove,
 	.id_table	= mt9m111_id,
 };

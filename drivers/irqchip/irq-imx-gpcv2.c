@@ -131,6 +131,7 @@ static struct irq_chip gpcv2_irqchip_data_chip = {
 	.irq_unmask		= imx_gpcv2_irq_unmask,
 	.irq_set_wake		= imx_gpcv2_irq_set_wake,
 	.irq_retrigger		= irq_chip_retrigger_hierarchy,
+	.irq_set_type		= irq_chip_set_type_parent,
 #ifdef CONFIG_SMP
 	.irq_set_affinity	= irq_chip_set_affinity_parent,
 #endif
@@ -258,7 +259,7 @@ static int __init imx_gpcv2_irqchip_init(struct device_node *node,
 		case 4:
 			writel_relaxed(~0, reg + GPC_IMR1_CORE2);
 			writel_relaxed(~0, reg + GPC_IMR1_CORE3);
-			/* fall through */
+			fallthrough;
 		case 2:
 			writel_relaxed(~0, reg + GPC_IMR1_CORE0);
 			writel_relaxed(~0, reg + GPC_IMR1_CORE1);

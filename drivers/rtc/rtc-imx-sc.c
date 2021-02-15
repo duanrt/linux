@@ -37,7 +37,7 @@ struct imx_sc_msg_timer_rtc_set_alarm {
 	u8 hour;
 	u8 min;
 	u8 sec;
-} __packed;
+} __packed __aligned(4);
 
 static int imx_sc_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
@@ -166,11 +166,9 @@ static int imx_sc_rtc_probe(struct platform_device *pdev)
 	imx_sc_rtc->range_min = 0;
 	imx_sc_rtc->range_max = U32_MAX;
 
-	ret = rtc_register_device(imx_sc_rtc);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to register rtc: %d\n", ret);
+	ret = devm_rtc_register_device(imx_sc_rtc);
+	if (ret)
 		return ret;
-	}
 
 	imx_scu_irq_register_notifier(&imx_sc_rtc_alarm_sc_notifier);
 

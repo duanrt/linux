@@ -21,7 +21,7 @@
 #include <linux/stddef.h>
 #include <linux/types.h>
 
-#if defined(__KERNEL__) && defined(CONFIG_COMPAT)
+#ifdef CONFIG_COMPAT
 /* Masks for extracting the FPSR and FPCR from the FPSCR */
 #define VFP_FPSCR_STAT_MASK	0xf800009f
 #define VFP_FPSCR_CTRL_MASK	0x07f79f00
@@ -69,6 +69,9 @@ static inline void *sve_pffr(struct thread_struct *thread)
 extern void sve_save_state(void *state, u32 *pfpsr);
 extern void sve_load_state(void const *state, u32 const *pfpsr,
 			   unsigned long vq_minus_1);
+extern void sve_flush_live(void);
+extern void sve_load_from_fpsimd_state(struct user_fpsimd_state const *state,
+				       unsigned long vq_minus_1);
 extern unsigned int sve_get_vl(void);
 
 struct arm64_cpu_capabilities;

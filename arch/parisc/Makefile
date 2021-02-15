@@ -19,12 +19,8 @@
 
 KBUILD_IMAGE := vmlinuz
 
-KBUILD_DEFCONFIG := default_defconfig
-
 NM		= sh $(srctree)/arch/parisc/nm
 CHECKFLAGS	+= -D__hppa__=1
-LIBGCC		= $(shell $(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
-export LIBGCC
 
 ifdef CONFIG_64BIT
 UTS_MACHINE	:= parisc64
@@ -34,6 +30,13 @@ LD_BFD		:= elf64-hppa-linux
 else # 32-bit
 CC_ARCHES	= hppa hppa2.0 hppa1.1
 LD_BFD		:= elf32-hppa-linux
+endif
+
+# select defconfig based on actual architecture
+ifeq ($(shell uname -m),parisc64)
+	KBUILD_DEFCONFIG := generic-64bit_defconfig
+else
+	KBUILD_DEFCONFIG := generic-32bit_defconfig
 endif
 
 export LD_BFD
@@ -62,7 +65,6 @@ KBUILD_CFLAGS += -DCC_USING_PATCHABLE_FUNCTION_ENTRY=1 \
 		 -DFTRACE_PATCHABLE_FUNCTION_SIZE=$(NOP_COUNT)
 
 CC_FLAGS_FTRACE := -fpatchable-function-entry=$(NOP_COUNT),$(shell echo $$(($(NOP_COUNT)-1)))
-KBUILD_LDFLAGS_MODULE += -T $(srctree)/arch/parisc/kernel/module.lds
 endif
 
 OBJCOPY_FLAGS =-O binary -R .note -R .comment -S
@@ -106,6 +108,8 @@ cflags-$(CONFIG_PA8X00)		+= -march=2.0 -mschedule=8000
 head-y			:= arch/parisc/kernel/head.o 
 
 KBUILD_CFLAGS	+= $(cflags-y)
+LIBGCC		:= $(shell $(CC) -print-libgcc-file-name)
+export LIBGCC
 
 kernel-y			:= mm/ kernel/ math-emu/
 
@@ -158,7 +162,7 @@ vmlinuz: bzImage
 	$(OBJCOPY) $(boot)/bzImage $@
 else
 vmlinuz: vmlinux
-	@gzip -cf -9 $< > $@
+	@$(KGZIP) -cf -9 $< > $@
 endif
 
 install:
@@ -181,6 +185,9 @@ define archhelp
 	@echo  '		  copy to $$(INSTALL_PATH)'
 	@echo  '  zinstall	- Install compressed vmlinuz kernel'
 endef
+
+archclean:
+	$(Q)$(MAKE) $(clean)=$(boot)
 
 archheaders:
 	$(Q)$(MAKE) $(build)=arch/parisc/kernel/syscalls all

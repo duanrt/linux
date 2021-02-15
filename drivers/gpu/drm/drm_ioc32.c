@@ -108,7 +108,7 @@ static int compat_drm_version(struct file *file, unsigned int cmd,
 		.desc = compat_ptr(v32.desc),
 	};
 	err = drm_ioctl_kernel(file, drm_version, &v,
-			       DRM_UNLOCKED|DRM_RENDER_ALLOW);
+			       DRM_RENDER_ALLOW);
 	if (err)
 		return err;
 
@@ -142,7 +142,7 @@ static int compat_drm_getunique(struct file *file, unsigned int cmd,
 		.unique = compat_ptr(uq32.unique),
 	};
 
-	err = drm_ioctl_kernel(file, drm_getunique, &uq, DRM_UNLOCKED);
+	err = drm_ioctl_kernel(file, drm_getunique, &uq, 0);
 	if (err)
 		return err;
 
@@ -181,7 +181,7 @@ static int compat_drm_getmap(struct file *file, unsigned int cmd,
 		return -EFAULT;
 
 	map.offset = m32.offset;
-	err = drm_ioctl_kernel(file, drm_legacy_getmap_ioctl, &map, DRM_UNLOCKED);
+	err = drm_ioctl_kernel(file, drm_legacy_getmap_ioctl, &map, 0);
 	if (err)
 		return err;
 
@@ -267,7 +267,7 @@ static int compat_drm_getclient(struct file *file, unsigned int cmd,
 
 	client.idx = c32.idx;
 
-	err = drm_ioctl_kernel(file, drm_getclient, &client, DRM_UNLOCKED);
+	err = drm_ioctl_kernel(file, drm_getclient, &client, 0);
 	if (err)
 		return err;
 
@@ -297,7 +297,7 @@ static int compat_drm_getstats(struct file *file, unsigned int cmd,
 	drm_stats32_t __user *argp = (void __user *)arg;
 	int err;
 
-	err = drm_ioctl_kernel(file, drm_noop, NULL, DRM_UNLOCKED);
+	err = drm_ioctl_kernel(file, drm_noop, NULL, 0);
 	if (err)
 		return err;
 
@@ -388,6 +388,7 @@ static int drm_legacy_infobufs32(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
 	drm_buf_info32_t *request = data;
+
 	return __drm_legacy_infobufs(dev, data, &request->count, copy_one_buf32);
 }
 
@@ -813,6 +814,7 @@ static int compat_drm_update_draw(struct file *file, unsigned int cmd,
 				  unsigned long arg)
 {
 	drm_update_draw32_t update32;
+
 	if (copy_from_user(&update32, (void __user *)arg, sizeof(update32)))
 		return -EFAULT;
 
@@ -895,8 +897,7 @@ static int compat_drm_mode_addfb2(struct file *file, unsigned int cmd,
 			   sizeof(req64.modifier)))
 		return -EFAULT;
 
-	err = drm_ioctl_kernel(file, drm_mode_addfb2, &req64,
-			       DRM_UNLOCKED);
+	err = drm_ioctl_kernel(file, drm_mode_addfb2, &req64, 0);
 	if (err)
 		return err;
 
@@ -986,8 +987,8 @@ long drm_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (!fn)
 		return drm_ioctl(filp, cmd, arg);
 
-	DRM_DEBUG("pid=%d, dev=0x%lx, auth=%d, %s\n",
-		  task_pid_nr(current),
+	DRM_DEBUG("comm=\"%s\", pid=%d, dev=0x%lx, auth=%d, %s\n",
+		  current->comm, task_pid_nr(current),
 		  (long)old_encode_dev(file_priv->minor->kdev->devt),
 		  file_priv->authenticated,
 		  drm_compat_ioctls[nr].name);

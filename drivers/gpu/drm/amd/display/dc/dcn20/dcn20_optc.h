@@ -36,6 +36,7 @@
 	SRI(OTG_GSL_WINDOW_Y, OTG, inst),\
 	SRI(OTG_VUPDATE_KEEPOUT, OTG, inst),\
 	SRI(OTG_DSC_START_POSITION, OTG, inst),\
+	SRI(OTG_CRC_CNTL2, OTG, inst),\
 	SRI(OPTC_DATA_FORMAT_CONTROL, ODM, inst),\
 	SRI(OPTC_BYTES_PER_PIXEL, ODM, inst),\
 	SRI(OPTC_WIDTH_CONTROL, ODM, inst),\
@@ -62,6 +63,10 @@
 	SF(OTG0_OTG_GSL_CONTROL, OTG_MASTER_UPDATE_LOCK_GSL_EN, mask_sh), \
 	SF(OTG0_OTG_DSC_START_POSITION, OTG_DSC_START_POSITION_X, mask_sh), \
 	SF(OTG0_OTG_DSC_START_POSITION, OTG_DSC_START_POSITION_LINE_NUM, mask_sh),\
+	SF(OTG0_OTG_CRC_CNTL2, OTG_CRC_DSC_MODE, mask_sh),\
+	SF(OTG0_OTG_CRC_CNTL2, OTG_CRC_DATA_STREAM_COMBINE_MODE, mask_sh),\
+	SF(OTG0_OTG_CRC_CNTL2, OTG_CRC_DATA_STREAM_SPLIT_MODE, mask_sh),\
+	SF(OTG0_OTG_CRC_CNTL2, OTG_CRC_DATA_FORMAT, mask_sh),\
 	SF(ODM0_OPTC_DATA_SOURCE_SELECT, OPTC_SEG0_SRC_SEL, mask_sh),\
 	SF(ODM0_OPTC_DATA_SOURCE_SELECT, OPTC_SEG1_SRC_SEL, mask_sh),\
 	SF(ODM0_OPTC_DATA_SOURCE_SELECT, OPTC_NUM_OF_INPUT_SEGMENT, mask_sh),\
@@ -86,18 +91,16 @@ void optc2_set_gsl_source_select(struct timing_generator *optc,
 		int group_idx,
 		uint32_t gsl_ready_signal);
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 void optc2_set_dsc_config(struct timing_generator *optc,
 					enum optc_dsc_mode dsc_mode,
 					uint32_t dsc_bytes_per_pixel,
 					uint32_t dsc_slice_width);
-#endif
 
 void optc2_set_odm_bypass(struct timing_generator *optc,
 		const struct dc_crtc_timing *dc_crtc_timing);
 
-void optc2_set_odm_combine(struct timing_generator *optc, int combine_opp_id,
-		int mpcc_hactive, enum dc_pixel_encoding pixel_encoding);
+void optc2_set_odm_combine(struct timing_generator *optc, int *opp_id, int opp_cnt,
+		struct dc_crtc_timing *timing);
 
 void optc2_get_optc_source(struct timing_generator *optc,
 		uint32_t *num_of_src_opp,
@@ -106,11 +109,11 @@ void optc2_get_optc_source(struct timing_generator *optc,
 
 void optc2_triplebuffer_lock(struct timing_generator *optc);
 void optc2_triplebuffer_unlock(struct timing_generator *optc);
-void optc2_lock(struct timing_generator *optc);
-void optc2_lock_global(struct timing_generator *optc);
-void optc2_setup_global_lock(struct timing_generator *optc);
 void optc2_lock_doublebuffer_disable(struct timing_generator *optc);
 void optc2_lock_doublebuffer_enable(struct timing_generator *optc);
+void optc2_setup_manual_trigger(struct timing_generator *optc);
 void optc2_program_manual_trigger(struct timing_generator *optc);
-
+bool optc2_is_two_pixels_per_containter(const struct dc_crtc_timing *timing);
+bool optc2_configure_crc(struct timing_generator *optc,
+			  const struct crc_params *params);
 #endif /* __DC_OPTC_DCN20_H__ */
