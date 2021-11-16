@@ -16,10 +16,10 @@
 	by Patrick McHardy and then maintained by Andre Correa.
 
 	You need the tc action  mirror or redirect to feed this device
-       	packets.
+	packets.
 
 
-  	Authors:	Jamal Hadi Salim (2005)
+	Authors:	Jamal Hadi Salim (2005)
 
 */
 
@@ -31,6 +31,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/moduleparam.h>
+#include <linux/netfilter_netdev.h>
 #include <net/pkt_sched.h>
 #include <net/net_namespace.h>
 
@@ -59,9 +60,9 @@ static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev);
 static int ifb_open(struct net_device *dev);
 static int ifb_close(struct net_device *dev);
 
-static void ifb_ri_tasklet(unsigned long _txp)
+static void ifb_ri_tasklet(struct tasklet_struct *t)
 {
-	struct ifb_q_private *txp = (struct ifb_q_private *)_txp;
+	struct ifb_q_private *txp = from_tasklet(txp, t, ifb_tasklet);
 	struct netdev_queue *txq;
 	struct sk_buff *skb;
 
@@ -75,8 +76,12 @@ static void ifb_ri_tasklet(unsigned long _txp)
 	}
 
 	while ((skb = __skb_dequeue(&txp->tq)) != NULL) {
+		/* Skip tc and netfilter to prevent redirection loop. */
 		skb->redirected = 0;
+#ifdef CONFIG_NET_CLS_ACT
 		skb->tc_skip_classify = 1;
+#endif
+		nf_skip_egress(skb, true);
 
 		u64_stats_update_begin(&txp->tsync);
 		txp->tx_packets++;
@@ -170,8 +175,7 @@ static int ifb_dev_init(struct net_device *dev)
 		__skb_queue_head_init(&txp->tq);
 		u64_stats_init(&txp->rsync);
 		u64_stats_init(&txp->tsync);
-		tasklet_init(&txp->ifb_tasklet, ifb_ri_tasklet,
-			     (unsigned long)txp);
+		tasklet_setup(&txp->ifb_tasklet, ifb_ri_tasklet);
 		netif_tx_start_queue(netdev_get_tx_queue(dev, i));
 	}
 	return 0;

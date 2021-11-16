@@ -13,6 +13,7 @@
 #include <linux/netdevice.h>
 #include <linux/list.h>
 #include <linux/if_vlan.h>
+#include <linux/if_hsr.h>
 
 /* Time constants as specified in the HSR specification (IEC-62439-3 2010)
  * Table 8.
@@ -21,6 +22,7 @@
 #define HSR_LIFE_CHECK_INTERVAL		 2000 /* ms */
 #define HSR_NODE_FORGET_TIME		60000 /* ms */
 #define HSR_ANNOUNCE_INTERVAL		  100 /* ms */
+#define HSR_ENTRY_FORGET_TIME		  400 /* ms */
 
 /* By how much may slave1 and slave2 timestamps of latest received frame from
  * each node differ before we notify of communication problem?
@@ -33,13 +35,15 @@
  * HSR_NODE_FORGET_TIME?
  */
 #define PRUNE_PERIOD			 3000 /* ms */
-
+#define HSR_TLV_EOT				   0  /* End of TLVs */
 #define HSR_TLV_ANNOUNCE		   22
 #define HSR_TLV_LIFE_CHECK		   23
 /* PRP V1 life check for Duplicate discard */
 #define PRP_TLV_LIFE_CHECK_DD		   20
 /* PRP V1 life check for Duplicate Accept */
 #define PRP_TLV_LIFE_CHECK_DA		   21
+/* PRP V1 life redundancy box MAC address */
+#define PRP_TLV_REDBOX_MAC		   30
 
 /* HSR Tag.
  * As defined in IEC-62439-3:2010, the HSR tag is really { ethertype = 0x88FB,
@@ -92,14 +96,18 @@ struct hsr_vlan_ethhdr {
 	struct hsr_tag	hsr_tag;
 } __packed;
 
+struct hsr_sup_tlv {
+	u8		HSR_TLV_type;
+	u8		HSR_TLV_length;
+};
+
 /* HSR/PRP Supervision Frame data types.
  * Field names as defined in the IEC:2010 standard for HSR.
  */
 struct hsr_sup_tag {
-	__be16		path_and_HSR_ver;
-	__be16		sequence_nr;
-	__u8		HSR_TLV_type;
-	__u8		HSR_TLV_length;
+	__be16				path_and_HSR_ver;
+	__be16				sequence_nr;
+	struct hsr_sup_tlv  tlv;
 } __packed;
 
 struct hsr_sup_payload {
@@ -171,13 +179,6 @@ struct hsr_port {
 	enum hsr_port_type	type;
 };
 
-/* used by driver internally to differentiate various protocols */
-enum hsr_version {
-	HSR_V0 = 0,
-	HSR_V1,
-	PRP_V1,
-};
-
 struct hsr_frame_info;
 struct hsr_node;
 
@@ -191,8 +192,8 @@ struct hsr_proto_ops {
 					       struct hsr_port *port);
 	struct sk_buff * (*create_tagged_frame)(struct hsr_frame_info *frame,
 						struct hsr_port *port);
-	void (*fill_frame_info)(__be16 proto, struct sk_buff *skb,
-				struct hsr_frame_info *frame);
+	int (*fill_frame_info)(__be16 proto, struct sk_buff *skb,
+			       struct hsr_frame_info *frame);
 	bool (*invalid_dan_ingress_frame)(__be16 protocol);
 	void (*update_san_info)(struct hsr_node *node, bool is_sup);
 };

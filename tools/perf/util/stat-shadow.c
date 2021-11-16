@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0
+#include <math.h>
 #include <stdio.h>
 #include "evsel.h"
 #include "stat.h"
 #include "color.h"
+#include "debug.h"
 #include "pmu.h"
 #include "rblist.h"
 #include "evlist.h"
 #include "expr.h"
 #include "metricgroup.h"
 #include "cgroup.h"
+#include "units.h"
 #include <linux/zalloc.h>
+#include "iostat.h"
 
 /*
  * AGGR_GLOBAL: Use CPU 0
@@ -273,6 +277,18 @@ void perf_stat__update_shadow_stats(struct evsel *counter, u64 count,
 	else if (perf_stat_evsel__is(counter, TOPDOWN_BE_BOUND))
 		update_runtime_stat(st, STAT_TOPDOWN_BE_BOUND,
 				    cpu, count, &rsd);
+	else if (perf_stat_evsel__is(counter, TOPDOWN_HEAVY_OPS))
+		update_runtime_stat(st, STAT_TOPDOWN_HEAVY_OPS,
+				    cpu, count, &rsd);
+	else if (perf_stat_evsel__is(counter, TOPDOWN_BR_MISPREDICT))
+		update_runtime_stat(st, STAT_TOPDOWN_BR_MISPREDICT,
+				    cpu, count, &rsd);
+	else if (perf_stat_evsel__is(counter, TOPDOWN_FETCH_LAT))
+		update_runtime_stat(st, STAT_TOPDOWN_FETCH_LAT,
+				    cpu, count, &rsd);
+	else if (perf_stat_evsel__is(counter, TOPDOWN_MEM_BOUND))
+		update_runtime_stat(st, STAT_TOPDOWN_MEM_BOUND,
+				    cpu, count, &rsd);
 	else if (evsel__match(counter, HARDWARE, HW_STALLED_CYCLES_FRONTEND))
 		update_runtime_stat(st, STAT_STALLED_CYCLES_FRONT,
 				    cpu, count, &rsd);
@@ -356,38 +372,42 @@ void perf_stat__collect_metric_expr(struct evlist *evsel_list)
 {
 	struct evsel *counter, *leader, **metric_events, *oc;
 	bool found;
-	struct expr_parse_ctx ctx;
+	struct expr_parse_ctx *ctx;
 	struct hashmap_entry *cur;
 	size_t bkt;
 	int i;
 
-	expr__ctx_init(&ctx);
+	ctx = expr__ctx_new();
+	if (!ctx) {
+		pr_debug("expr__ctx_new failed");
+		return;
+	}
 	evlist__for_each_entry(evsel_list, counter) {
 		bool invalid = false;
 
-		leader = counter->leader;
+		leader = evsel__leader(counter);
 		if (!counter->metric_expr)
 			continue;
 
-		expr__ctx_clear(&ctx);
+		expr__ctx_clear(ctx);
 		metric_events = counter->metric_events;
 		if (!metric_events) {
-			if (expr__find_other(counter->metric_expr,
-					     counter->name,
-					     &ctx, 1) < 0)
+			if (expr__find_ids(counter->metric_expr,
+					   counter->name,
+					   ctx) < 0)
 				continue;
 
 			metric_events = calloc(sizeof(struct evsel *),
-					       hashmap__size(&ctx.ids) + 1);
+					       hashmap__size(ctx->ids) + 1);
 			if (!metric_events) {
-				expr__ctx_clear(&ctx);
+				expr__ctx_free(ctx);
 				return;
 			}
 			counter->metric_events = metric_events;
 		}
 
 		i = 0;
-		hashmap__for_each_entry((&ctx.ids), cur, bkt) {
+		hashmap__for_each_entry(ctx->ids, cur, bkt) {
 			const char *metric_name = (const char *)cur->key;
 
 			found = false;
@@ -424,6 +444,7 @@ void perf_stat__collect_metric_expr(struct evlist *evsel_list)
 						"Add %s event to groups to get metric expression for %s\n",
 						metric_name,
 						counter->name);
+					free(printed);
 					printed = strdup(metric_name);
 				}
 				invalid = true;
@@ -439,7 +460,7 @@ void perf_stat__collect_metric_expr(struct evlist *evsel_list)
 			counter->metric_expr = NULL;
 		}
 	}
-	expr__ctx_clear(&ctx);
+	expr__ctx_free(ctx);
 }
 
 static double runtime_stat_avg(struct runtime_stat *st,
@@ -801,18 +822,19 @@ static int prepare_metric(struct evsel **metric_events,
 			  struct runtime_stat *st)
 {
 	double scale;
-	char *n, *pn;
+	char *n;
 	int i, j, ret;
 
-	expr__ctx_init(pctx);
 	for (i = 0; metric_events[i]; i++) {
 		struct saved_value *v;
 		struct stats *stats;
 		u64 metric_total = 0;
+		int source_count;
 
 		if (!strcmp(metric_events[i]->name, "duration_time")) {
 			stats = &walltime_nsecs_stats;
 			scale = 1e-9;
+			source_count = 1;
 		} else {
 			v = saved_value_lookup(metric_events[i], cpu, false,
 					       STAT_NONE, 0, st,
@@ -821,27 +843,18 @@ static int prepare_metric(struct evsel **metric_events,
 				break;
 			stats = &v->stats;
 			scale = 1.0;
+			source_count = evsel__source_count(metric_events[i]);
 
 			if (v->metric_other)
 				metric_total = v->metric_total;
 		}
-
-		n = strdup(metric_events[i]->name);
+		n = strdup(evsel__metric_id(metric_events[i]));
 		if (!n)
 			return -ENOMEM;
-		/*
-		 * This display code with --no-merge adds [cpu] postfixes.
-		 * These are not supported by the parser. Remove everything
-		 * after the space.
-		 */
-		pn = strchr(n, ' ');
-		if (pn)
-			*pn = 0;
 
-		if (metric_total)
-			expr__add_id_val(pctx, n, metric_total);
-		else
-			expr__add_id_val(pctx, n, avg_stats(stats)*scale);
+		expr__add_id_val_source_count(pctx, n,
+					metric_total ? : avg_stats(stats) * scale,
+					source_count);
 	}
 
 	for (j = 0; metric_refs && metric_refs[j].metric_name; j++) {
@@ -866,17 +879,23 @@ static void generic_metric(struct perf_stat_config *config,
 			   struct runtime_stat *st)
 {
 	print_metric_t print_metric = out->print_metric;
-	struct expr_parse_ctx pctx;
+	struct expr_parse_ctx *pctx;
 	double ratio, scale;
 	int i;
 	void *ctxp = out->ctx;
 
-	i = prepare_metric(metric_events, metric_refs, &pctx, cpu, st);
-	if (i < 0)
+	pctx = expr__ctx_new();
+	if (!pctx)
 		return;
 
+	pctx->runtime = runtime;
+	i = prepare_metric(metric_events, metric_refs, pctx, cpu, st);
+	if (i < 0) {
+		expr__ctx_free(pctx);
+		return;
+	}
 	if (!metric_events[i]) {
-		if (expr__parse(&ratio, &pctx, metric_expr, runtime) == 0) {
+		if (expr__parse(&ratio, pctx, metric_expr) == 0) {
 			char *unit;
 			char metric_bf[64];
 
@@ -912,22 +931,26 @@ static void generic_metric(struct perf_stat_config *config,
 			     (metric_name ? metric_name : name) : "", 0);
 	}
 
-	expr__ctx_clear(&pctx);
+	expr__ctx_free(pctx);
 }
 
 double test_generic_metric(struct metric_expr *mexp, int cpu, struct runtime_stat *st)
 {
-	struct expr_parse_ctx pctx;
+	struct expr_parse_ctx *pctx;
 	double ratio = 0.0;
 
-	if (prepare_metric(mexp->metric_events, mexp->metric_refs, &pctx, cpu, st) < 0)
+	pctx = expr__ctx_new();
+	if (!pctx)
+		return NAN;
+
+	if (prepare_metric(mexp->metric_events, mexp->metric_refs, pctx, cpu, st) < 0)
 		goto out;
 
-	if (expr__parse(&ratio, &pctx, mexp->metric_expr, 1))
+	if (expr__parse(&ratio, pctx, mexp->metric_expr))
 		ratio = 0.0;
 
 out:
-	expr__ctx_clear(&pctx);
+	expr__ctx_free(pctx);
 	return ratio;
 }
 
@@ -949,7 +972,9 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 	struct metric_event *me;
 	int num = 1;
 
-	if (evsel__match(evsel, HARDWARE, HW_INSTRUCTIONS)) {
+	if (config->iostat_run) {
+		iostat_print_metric(config, evsel, out);
+	} else if (evsel__match(evsel, HARDWARE, HW_INSTRUCTIONS)) {
 		total = runtime_stat_avg(st, STAT_CYCLES, cpu, &rsd);
 
 		if (total) {
@@ -1174,22 +1199,99 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 			color = PERF_COLOR_RED;
 		print_metric(config, ctxp, color, "%8.1f%%", "bad speculation",
 				bad_spec * 100.);
+	} else if (perf_stat_evsel__is(evsel, TOPDOWN_HEAVY_OPS) &&
+			full_td(cpu, st, &rsd) && (config->topdown_level > 1)) {
+		double retiring = td_metric_ratio(cpu,
+						  STAT_TOPDOWN_RETIRING, st,
+						  &rsd);
+		double heavy_ops = td_metric_ratio(cpu,
+						   STAT_TOPDOWN_HEAVY_OPS, st,
+						   &rsd);
+		double light_ops = retiring - heavy_ops;
+
+		if (retiring > 0.7 && heavy_ops > 0.1)
+			color = PERF_COLOR_GREEN;
+		print_metric(config, ctxp, color, "%8.1f%%", "heavy operations",
+				heavy_ops * 100.);
+		if (retiring > 0.7 && light_ops > 0.6)
+			color = PERF_COLOR_GREEN;
+		else
+			color = NULL;
+		print_metric(config, ctxp, color, "%8.1f%%", "light operations",
+				light_ops * 100.);
+	} else if (perf_stat_evsel__is(evsel, TOPDOWN_BR_MISPREDICT) &&
+			full_td(cpu, st, &rsd) && (config->topdown_level > 1)) {
+		double bad_spec = td_metric_ratio(cpu,
+						  STAT_TOPDOWN_BAD_SPEC, st,
+						  &rsd);
+		double br_mis = td_metric_ratio(cpu,
+						STAT_TOPDOWN_BR_MISPREDICT, st,
+						&rsd);
+		double m_clears = bad_spec - br_mis;
+
+		if (bad_spec > 0.1 && br_mis > 0.05)
+			color = PERF_COLOR_RED;
+		print_metric(config, ctxp, color, "%8.1f%%", "branch mispredict",
+				br_mis * 100.);
+		if (bad_spec > 0.1 && m_clears > 0.05)
+			color = PERF_COLOR_RED;
+		else
+			color = NULL;
+		print_metric(config, ctxp, color, "%8.1f%%", "machine clears",
+				m_clears * 100.);
+	} else if (perf_stat_evsel__is(evsel, TOPDOWN_FETCH_LAT) &&
+			full_td(cpu, st, &rsd) && (config->topdown_level > 1)) {
+		double fe_bound = td_metric_ratio(cpu,
+						  STAT_TOPDOWN_FE_BOUND, st,
+						  &rsd);
+		double fetch_lat = td_metric_ratio(cpu,
+						   STAT_TOPDOWN_FETCH_LAT, st,
+						   &rsd);
+		double fetch_bw = fe_bound - fetch_lat;
+
+		if (fe_bound > 0.2 && fetch_lat > 0.15)
+			color = PERF_COLOR_RED;
+		print_metric(config, ctxp, color, "%8.1f%%", "fetch latency",
+				fetch_lat * 100.);
+		if (fe_bound > 0.2 && fetch_bw > 0.1)
+			color = PERF_COLOR_RED;
+		else
+			color = NULL;
+		print_metric(config, ctxp, color, "%8.1f%%", "fetch bandwidth",
+				fetch_bw * 100.);
+	} else if (perf_stat_evsel__is(evsel, TOPDOWN_MEM_BOUND) &&
+			full_td(cpu, st, &rsd) && (config->topdown_level > 1)) {
+		double be_bound = td_metric_ratio(cpu,
+						  STAT_TOPDOWN_BE_BOUND, st,
+						  &rsd);
+		double mem_bound = td_metric_ratio(cpu,
+						   STAT_TOPDOWN_MEM_BOUND, st,
+						   &rsd);
+		double core_bound = be_bound - mem_bound;
+
+		if (be_bound > 0.2 && mem_bound > 0.2)
+			color = PERF_COLOR_RED;
+		print_metric(config, ctxp, color, "%8.1f%%", "memory bound",
+				mem_bound * 100.);
+		if (be_bound > 0.2 && core_bound > 0.1)
+			color = PERF_COLOR_RED;
+		else
+			color = NULL;
+		print_metric(config, ctxp, color, "%8.1f%%", "Core bound",
+				core_bound * 100.);
 	} else if (evsel->metric_expr) {
 		generic_metric(config, evsel->metric_expr, evsel->metric_events, NULL,
 				evsel->name, evsel->metric_name, NULL, 1, cpu, out, st);
 	} else if (runtime_stat_n(st, STAT_NSECS, cpu, &rsd) != 0) {
-		char unit = 'M';
-		char unit_buf[10];
+		char unit = ' ';
+		char unit_buf[10] = "/sec";
 
 		total = runtime_stat_avg(st, STAT_NSECS, cpu, &rsd);
-
 		if (total)
-			ratio = 1000.0 * avg / total;
-		if (ratio < 0.001) {
-			ratio *= 1000;
-			unit = 'K';
-		}
-		snprintf(unit_buf, sizeof(unit_buf), "%c/sec", unit);
+			ratio = convert_unit_double(1000000000.0 * avg / total, &unit);
+
+		if (unit != ' ')
+			snprintf(unit_buf, sizeof(unit_buf), "%c/sec", unit);
 		print_metric(config, ctxp, NULL, "%8.3f", unit_buf, ratio);
 	} else if (perf_stat_evsel__is(evsel, SMI_NUM)) {
 		print_smi_cost(config, cpu, out, st, &rsd);

@@ -19,7 +19,6 @@
 #include <asm/dt_cpu_ftrs.h>
 #include <asm/mce.h>
 #include <asm/mmu.h>
-#include <asm/oprofile_impl.h>
 #include <asm/prom.h>
 #include <asm/setup.h>
 
@@ -103,7 +102,6 @@ static struct cpu_spec __initdata base_cpu_spec = {
 	.num_pmcs		= 0,
 	.pmc_type		= PPC_PMC_DEFAULT,
 	.oprofile_cpu_type	= NULL,
-	.oprofile_type		= PPC_OPROFILE_INVALID,
 	.cpu_setup		= NULL,
 	.cpu_restore		= __restore_cpu_cpufeatures,
 	.machine_check_early	= NULL,
@@ -1097,8 +1095,8 @@ static int __init dt_cpu_ftrs_scan_callback(unsigned long node, const char
 
 	cpufeatures_setup_finished();
 
-	memblock_free(__pa(dt_cpu_features),
-			sizeof(struct dt_cpu_feature)*nr_dt_cpu_features);
+	memblock_free(dt_cpu_features,
+		      sizeof(struct dt_cpu_feature) * nr_dt_cpu_features);
 
 	return 0;
 }

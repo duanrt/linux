@@ -18,8 +18,10 @@
 #include <linux/kasan-checks.h>
 #include <linux/string.h>
 
+#include <asm/asm-extable.h>
 #include <asm/cpufeature.h>
 #include <asm/mmu.h>
+#include <asm/mte.h>
 #include <asm/ptrace.h>
 #include <asm/memory.h>
 #include <asm/extable.h>
@@ -69,12 +71,6 @@ static inline unsigned long __range_ok(const void __user *addr, unsigned long si
 
 #define access_ok(addr, size)	__range_ok(addr, size)
 
-#define _ASM_EXTABLE(from, to)						\
-	"	.pushsection	__ex_table, \"a\"\n"			\
-	"	.align		3\n"					\
-	"	.long		(" #from " - .), (" #to " - .)\n"	\
-	"	.popsection\n"
-
 /*
  * User access enabling/disabling.
  */
@@ -87,7 +83,7 @@ static inline void __uaccess_ttbr0_disable(void)
 	ttbr = read_sysreg(ttbr1_el1);
 	ttbr &= ~TTBR_ASID_MASK;
 	/* reserved_pg_dir placed before swapper_pg_dir */
-	write_sysreg(ttbr - PAGE_SIZE, ttbr0_el1);
+	write_sysreg(ttbr - RESERVED_SWAPPER_OFFSET, ttbr0_el1);
 	isb();
 	/* Set reserved ASID */
 	write_sysreg(ttbr, ttbr1_el1);
@@ -188,6 +184,23 @@ static inline void __uaccess_enable_tco(void)
 				 ARM64_MTE, CONFIG_KASAN_HW_TAGS));
 }
 
+/*
+ * These functions disable tag checking only if in MTE async mode
+ * since the sync mode generates exceptions synchronously and the
+ * nofault or load_unaligned_zeropad can handle them.
+ */
+static inline void __uaccess_disable_tco_async(void)
+{
+	if (system_uses_mte_async_or_asymm_mode())
+		 __uaccess_disable_tco();
+}
+
+static inline void __uaccess_enable_tco_async(void)
+{
+	if (system_uses_mte_async_or_asymm_mode())
+		__uaccess_enable_tco();
+}
+
 static inline void uaccess_disable_privileged(void)
 {
 	__uaccess_disable_tco();
@@ -242,15 +255,9 @@ static inline void __user *__uaccess_mask_ptr(const void __user *ptr)
 	asm volatile(							\
 	"1:	" load "	" reg "1, [%2]\n"			\
 	"2:\n"								\
-	"	.section .fixup, \"ax\"\n"				\
-	"	.align	2\n"						\
-	"3:	mov	%w0, %3\n"					\
-	"	mov	%1, #0\n"					\
-	"	b	2b\n"						\
-	"	.previous\n"						\
-	_ASM_EXTABLE(1b, 3b)						\
+	_ASM_EXTABLE_UACCESS_ERR_ZERO(1b, 2b, %w0, %w1)			\
 	: "+r" (err), "=&r" (x)						\
-	: "r" (addr), "i" (-EFAULT))
+	: "r" (addr))
 
 #define __raw_get_mem(ldr, x, ptr, err)					\
 do {									\
@@ -307,8 +314,10 @@ do {									\
 do {									\
 	int __gkn_err = 0;						\
 									\
+	__uaccess_enable_tco_async();					\
 	__raw_get_mem("ldr", *((type *)(dst)),				\
 		      (__force type *)(src), __gkn_err);		\
+	__uaccess_disable_tco_async();					\
 	if (unlikely(__gkn_err))					\
 		goto err_label;						\
 } while (0)
@@ -317,14 +326,9 @@ do {									\
 	asm volatile(							\
 	"1:	" store "	" reg "1, [%2]\n"			\
 	"2:\n"								\
-	"	.section .fixup,\"ax\"\n"				\
-	"	.align	2\n"						\
-	"3:	mov	%w0, %3\n"					\
-	"	b	2b\n"						\
-	"	.previous\n"						\
-	_ASM_EXTABLE(1b, 3b)						\
+	_ASM_EXTABLE_UACCESS_ERR(1b, 2b, %w0)				\
 	: "+r" (err)							\
-	: "r" (x), "r" (addr), "i" (-EFAULT))
+	: "r" (x), "r" (addr))
 
 #define __raw_put_mem(str, x, ptr, err)					\
 do {									\
@@ -380,8 +384,10 @@ do {									\
 do {									\
 	int __pkn_err = 0;						\
 									\
+	__uaccess_enable_tco_async();					\
 	__raw_put_mem("str", *((type *)(src)),				\
 		      (__force type *)(dst), __pkn_err);		\
+	__uaccess_disable_tco_async();					\
 	if (unlikely(__pkn_err))					\
 		goto err_label;						\
 } while(0)
@@ -406,17 +412,6 @@ extern unsigned long __must_check __arch_copy_to_user(void __user *to, const voi
 				    (from), (n));			\
 	uaccess_ttbr0_disable();					\
 	__actu_ret;							\
-})
-
-extern unsigned long __must_check __arch_copy_in_user(void __user *to, const void __user *from, unsigned long n);
-#define raw_copy_in_user(to, from, n)					\
-({									\
-	unsigned long __aciu_ret;					\
-	uaccess_ttbr0_enable();						\
-	__aciu_ret = __arch_copy_in_user(__uaccess_mask_ptr(to),	\
-				    __uaccess_mask_ptr(from), (n));	\
-	uaccess_ttbr0_disable();					\
-	__aciu_ret;							\
 })
 
 #define INLINE_COPY_TO_USER

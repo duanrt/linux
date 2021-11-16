@@ -177,7 +177,7 @@ struct omap_hsmmc_host {
 	struct	regulator	*pbias;
 	bool			pbias_enabled;
 	void	__iomem		*base;
-	int			vqmmc_enabled;
+	bool			vqmmc_enabled;
 	resource_size_t		mapbase;
 	spinlock_t		irq_lock; /* Prevent races with irq handler */
 	unsigned int		dma_len;
@@ -232,7 +232,7 @@ static int omap_hsmmc_enable_supply(struct mmc_host *mmc)
 			dev_err(mmc_dev(mmc), "vmmc_aux reg enable failed\n");
 			goto err_vqmmc;
 		}
-		host->vqmmc_enabled = 1;
+		host->vqmmc_enabled = true;
 	}
 
 	return 0;
@@ -256,7 +256,7 @@ static int omap_hsmmc_disable_supply(struct mmc_host *mmc)
 			dev_err(mmc_dev(mmc), "vmmc_aux reg disable failed\n");
 			return ret;
 		}
-		host->vqmmc_enabled = 0;
+		host->vqmmc_enabled = false;
 	}
 
 	if (!IS_ERR(mmc->supply.vmmc)) {
@@ -285,22 +285,22 @@ static int omap_hsmmc_set_pbias(struct omap_hsmmc_host *host, bool power_on)
 		return 0;
 
 	if (power_on) {
-		if (host->pbias_enabled == 0) {
+		if (!host->pbias_enabled) {
 			ret = regulator_enable(host->pbias);
 			if (ret) {
 				dev_err(host->dev, "pbias reg enable fail\n");
 				return ret;
 			}
-			host->pbias_enabled = 1;
+			host->pbias_enabled = true;
 		}
 	} else {
-		if (host->pbias_enabled == 1) {
+		if (host->pbias_enabled) {
 			ret = regulator_disable(host->pbias);
 			if (ret) {
 				dev_err(host->dev, "pbias reg disable fail\n");
 				return ret;
 			}
-			host->pbias_enabled = 0;
+			host->pbias_enabled = false;
 		}
 	}
 
@@ -701,11 +701,6 @@ static void omap_hsmmc_context_save(struct omap_hsmmc_host *host)
 }
 
 #else
-
-static int omap_hsmmc_context_restore(struct omap_hsmmc_host *host)
-{
-	return 0;
-}
 
 static void omap_hsmmc_context_save(struct omap_hsmmc_host *host)
 {
@@ -1515,7 +1510,7 @@ static void omap_hsmmc_init_card(struct mmc_host *mmc, struct mmc_card *card)
 		 * REVISIT: should be moved to sdio core and made more
 		 * general e.g. by expanding the DT bindings of child nodes
 		 * to provide a mechanism to provide this information:
-		 * Documentation/devicetree/bindings/mmc/mmc-card.txt
+		 * Documentation/devicetree/bindings/mmc/mmc-card.yaml
 		 */
 
 		np = of_get_compatible_child(np, "ti,wl1251");
@@ -1861,8 +1856,8 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	host->base	= base + pdata->reg_offset;
 	host->power_mode = MMC_POWER_OFF;
 	host->next_data.cookie = 1;
-	host->pbias_enabled = 0;
-	host->vqmmc_enabled = 0;
+	host->pbias_enabled = false;
+	host->vqmmc_enabled = false;
 
 	platform_set_drvdata(pdev, host);
 
@@ -2086,6 +2081,7 @@ static int omap_hsmmc_resume(struct device *dev)
 }
 #endif
 
+#ifdef CONFIG_PM
 static int omap_hsmmc_runtime_suspend(struct device *dev)
 {
 	struct omap_hsmmc_host *host;
@@ -2153,11 +2149,11 @@ static int omap_hsmmc_runtime_resume(struct device *dev)
 	spin_unlock_irqrestore(&host->irq_lock, flags);
 	return 0;
 }
+#endif
 
 static const struct dev_pm_ops omap_hsmmc_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(omap_hsmmc_suspend, omap_hsmmc_resume)
-	.runtime_suspend = omap_hsmmc_runtime_suspend,
-	.runtime_resume = omap_hsmmc_runtime_resume,
+	SET_RUNTIME_PM_OPS(omap_hsmmc_runtime_suspend, omap_hsmmc_runtime_resume, NULL)
 };
 
 static struct platform_driver omap_hsmmc_driver = {

@@ -81,7 +81,7 @@ static vm_fault_t psbfb_vm_fault(struct vm_fault *vmf)
 	struct vm_area_struct *vma = vmf->vma;
 	struct drm_framebuffer *fb = vma->vm_private_data;
 	struct drm_device *dev = fb->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gtt_range *gtt = to_gtt_range(fb->obj[0]);
 	int page_num;
 	int i;
@@ -159,7 +159,7 @@ static const struct fb_ops psbfb_unaccel_ops = {
  *	@dev: our DRM device
  *	@fb: framebuffer to set up
  *	@mode_cmd: mode description
- *	@gt: backing object
+ *	@obj: backing object
  *
  *	Configure and fill in the boilerplate for our frame buffer. Return
  *	0 on success or an error code if we fail.
@@ -197,7 +197,7 @@ static int psb_framebuffer_init(struct drm_device *dev,
  *	psb_framebuffer_create	-	create a framebuffer backed by gt
  *	@dev: our DRM device
  *	@mode_cmd: the description of the requested mode
- *	@gt: the backing object
+ *	@obj: the backing object
  *
  *	Create a framebuffer object backed by the gt, and fill in the
  *	boilerplate required
@@ -252,7 +252,7 @@ static struct gtt_range *psbfb_alloc(struct drm_device *dev, int aligned_size)
 
 /**
  *	psbfb_create		-	create a framebuffer
- *	@fbdev: the framebuffer device
+ *	@fb_helper: the framebuffer helper
  *	@sizes: specification of the layout
  *
  *	Create a framebuffer to the specifications provided
@@ -261,7 +261,8 @@ static int psbfb_create(struct drm_fb_helper *fb_helper,
 				struct drm_fb_helper_surface_size *sizes)
 {
 	struct drm_device *dev = fb_helper->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	struct fb_info *info;
 	struct drm_framebuffer *fb;
 	struct drm_mode_fb_cmd2 mode_cmd;
@@ -325,8 +326,8 @@ static int psbfb_create(struct drm_fb_helper *fb_helper,
 
 	drm_fb_helper_fill_info(info, fb_helper, sizes);
 
-	info->fix.mmio_start = pci_resource_start(dev->pdev, 0);
-	info->fix.mmio_len = pci_resource_len(dev->pdev, 0);
+	info->fix.mmio_start = pci_resource_start(pdev, 0);
+	info->fix.mmio_len = pci_resource_len(pdev, 0);
 
 	/* Use default scratch pixmap (info->pixmap.flags = FB_PIXMAP_SYSTEM) */
 
@@ -351,6 +352,7 @@ static struct drm_framebuffer *psb_user_framebuffer_create
 			 const struct drm_mode_fb_cmd2 *cmd)
 {
 	struct drm_gem_object *obj;
+	struct drm_framebuffer *fb;
 
 	/*
 	 *	Find the GEM object and thus the gtt range object that is
@@ -361,14 +363,18 @@ static struct drm_framebuffer *psb_user_framebuffer_create
 		return ERR_PTR(-ENOENT);
 
 	/* Let the core code do all the work */
-	return psb_framebuffer_create(dev, cmd, obj);
+	fb = psb_framebuffer_create(dev, cmd, obj);
+	if (IS_ERR(fb))
+		drm_gem_object_put(obj);
+
+	return fb;
 }
 
 static int psbfb_probe(struct drm_fb_helper *fb_helper,
 				struct drm_fb_helper_surface_size *sizes)
 {
 	struct drm_device *dev = fb_helper->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	unsigned int fb_size;
 	int bytespp;
 
@@ -416,7 +422,7 @@ static int psb_fbdev_destroy(struct drm_device *dev,
 int psb_fbdev_init(struct drm_device *dev)
 {
 	struct drm_fb_helper *fb_helper;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	int ret;
 
 	fb_helper = kzalloc(sizeof(*fb_helper), GFP_KERNEL);
@@ -451,7 +457,7 @@ free:
 
 static void psb_fbdev_fini(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 
 	if (!dev_priv->fb_helper)
 		return;
@@ -468,7 +474,7 @@ static const struct drm_mode_config_funcs psb_mode_funcs = {
 
 static void psb_setup_outputs(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct drm_connector *connector;
 
 	drm_mode_create_scaling_mode_property(dev);
@@ -527,8 +533,9 @@ static void psb_setup_outputs(struct drm_device *dev)
 
 void psb_modeset_init(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct psb_intel_mode_device *mode_dev = &dev_priv->mode_dev;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	int i;
 
 	drm_mode_config_init(dev);
@@ -540,8 +547,7 @@ void psb_modeset_init(struct drm_device *dev)
 
 	/* set memory base */
 	/* Oaktrail and Poulsbo should use BAR 2*/
-	pci_read_config_dword(dev->pdev, PSB_BSM, (u32 *)
-					&(dev->mode_config.fb_base));
+	pci_read_config_dword(pdev, PSB_BSM, (u32 *)&(dev->mode_config.fb_base));
 
 	/* num pipes is 2 for PSB but 1 for Mrst */
 	for (i = 0; i < dev_priv->num_pipe; i++)
@@ -560,7 +566,7 @@ void psb_modeset_init(struct drm_device *dev)
 
 void psb_modeset_cleanup(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	if (dev_priv->modeset) {
 		drm_kms_helper_poll_fini(dev);
 		psb_fbdev_fini(dev);

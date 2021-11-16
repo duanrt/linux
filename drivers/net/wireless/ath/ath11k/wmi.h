@@ -119,6 +119,22 @@ enum {
 	WMI_HOST_WLAN_2G_5G_CAP	= 0x3,
 };
 
+/* Parameters used for WMI_VDEV_PARAM_AUTORATE_MISC_CFG command.
+ * Used only for HE auto rate mode.
+ */
+enum {
+	/* HE LTF related configuration */
+	WMI_HE_AUTORATE_LTF_1X = BIT(0),
+	WMI_HE_AUTORATE_LTF_2X = BIT(1),
+	WMI_HE_AUTORATE_LTF_4X = BIT(2),
+
+	/* HE GI related configuration */
+	WMI_AUTORATE_400NS_GI = BIT(8),
+	WMI_AUTORATE_800NS_GI = BIT(9),
+	WMI_AUTORATE_1600NS_GI = BIT(10),
+	WMI_AUTORATE_3200NS_GI = BIT(11),
+};
+
 /*
  * wmi command groups.
  */
@@ -257,6 +273,16 @@ enum wmi_tlv_cmd_id {
 	WMI_PDEV_DMA_RING_CFG_REQ_CMDID,
 	WMI_PDEV_HE_TB_ACTION_FRM_CMDID,
 	WMI_PDEV_PKTLOG_FILTER_CMDID,
+	WMI_PDEV_SET_RAP_CONFIG_CMDID,
+	WMI_PDEV_DSM_FILTER_CMDID,
+	WMI_PDEV_FRAME_INJECT_CMDID,
+	WMI_PDEV_TBTT_OFFSET_SYNC_CMDID,
+	WMI_PDEV_SET_SRG_BSS_COLOR_BITMAP_CMDID,
+	WMI_PDEV_SET_SRG_PARTIAL_BSSID_BITMAP_CMDID,
+	WMI_PDEV_SET_SRG_OBSS_COLOR_ENABLE_BITMAP_CMDID,
+	WMI_PDEV_SET_SRG_OBSS_BSSID_ENABLE_BITMAP_CMDID,
+	WMI_PDEV_SET_NON_SRG_OBSS_COLOR_ENABLE_BITMAP_CMDID,
+	WMI_PDEV_SET_NON_SRG_OBSS_BSSID_ENABLE_BITMAP_CMDID,
 	WMI_VDEV_CREATE_CMDID = WMI_TLV_CMD(WMI_GRP_VDEV),
 	WMI_VDEV_DELETE_CMDID,
 	WMI_VDEV_START_REQUEST_CMDID,
@@ -637,6 +663,9 @@ enum wmi_tlv_event_id {
 	WMI_PEER_RESERVED9_EVENTID,
 	WMI_PEER_RESERVED10_EVENTID,
 	WMI_PEER_OPER_MODE_CHANGE_EVENTID,
+	WMI_PEER_TX_PN_RESPONSE_EVENTID,
+	WMI_PEER_CFR_CAPTURE_EVENTID,
+	WMI_PEER_CREATE_CONF_EVENTID,
 	WMI_MGMT_RX_EVENTID = WMI_TLV_CMD(WMI_GRP_MGMT),
 	WMI_HOST_SWBA_EVENTID,
 	WMI_TBTTOFFSET_UPDATE_EVENTID,
@@ -919,6 +948,9 @@ enum wmi_tlv_pdev_param {
 	WMI_PDEV_PARAM_RADIO_CHAN_STATS_ENABLE,
 	WMI_PDEV_PARAM_RADIO_DIAGNOSIS_ENABLE,
 	WMI_PDEV_PARAM_MESH_MCAST_ENABLE,
+	WMI_PDEV_PARAM_SET_CMD_OBSS_PD_THRESHOLD = 0xbc,
+	WMI_PDEV_PARAM_SET_CMD_OBSS_PD_PER_AC = 0xbe,
+	WMI_PDEV_PARAM_ENABLE_SR_PROHIBIT = 0xc6,
 };
 
 enum wmi_tlv_vdev_param {
@@ -1031,7 +1063,9 @@ enum wmi_tlv_vdev_param {
 	WMI_VDEV_PARAM_HE_RANGE_EXT,
 	WMI_VDEV_PARAM_ENABLE_BCAST_PROBE_RESPONSE,
 	WMI_VDEV_PARAM_FILS_MAX_CHANNEL_GUARD_TIME,
+	WMI_VDEV_PARAM_HE_LTF = 0x74,
 	WMI_VDEV_PARAM_BA_MODE = 0x7e,
+	WMI_VDEV_PARAM_AUTORATE_MISC_CFG = 0x80,
 	WMI_VDEV_PARAM_SET_HE_SOUNDING_MODE = 0x87,
 	WMI_VDEV_PARAM_6GHZ_PARAMS = 0x99,
 	WMI_VDEV_PARAM_PROTOTYPE = 0x8000,
@@ -1812,10 +1846,15 @@ enum wmi_tlv_tag {
 	WMI_TAG_NDP_CHANNEL_INFO,
 	WMI_TAG_NDP_CMD,
 	WMI_TAG_NDP_EVENT,
-	/* TODO add all the missing cmds */
 	WMI_TAG_PDEV_PEER_PKTLOG_FILTER_CMD = 0x301,
 	WMI_TAG_PDEV_PEER_PKTLOG_FILTER_INFO,
 	WMI_TAG_FILS_DISCOVERY_TMPL_CMD = 0x344,
+	WMI_TAG_PDEV_SRG_BSS_COLOR_BITMAP_CMD = 0x37b,
+	WMI_TAG_PDEV_SRG_PARTIAL_BSSID_BITMAP_CMD,
+	WMI_TAG_PDEV_SRG_OBSS_COLOR_ENABLE_BITMAP_CMD = 0x381,
+	WMI_TAG_PDEV_SRG_OBSS_BSSID_ENABLE_BITMAP_CMD,
+	WMI_TAG_PDEV_NON_SRG_OBSS_COLOR_ENABLE_BITMAP_CMD,
+	WMI_TAG_PDEV_NON_SRG_OBSS_BSSID_ENABLE_BITMAP_CMD,
 	WMI_TAG_MAX
 };
 
@@ -2039,6 +2078,7 @@ enum wmi_tlv_service {
 	WMI_TLV_SERVICE_PER_PEER_HTT_STATS_RESET = 213,
 	WMI_TLV_SERVICE_FREQINFO_IN_METADATA = 219,
 	WMI_TLV_SERVICE_EXT2_MSG = 220,
+	WMI_TLV_SERVICE_SRG_SRP_SPATIAL_REUSE_SUPPORT = 249,
 
 	WMI_MAX_EXT_SERVICE
 };
@@ -2107,6 +2147,24 @@ enum wmi_direct_buffer_module {
 
 	/* keep it last */
 	WMI_DIRECT_BUF_MAX
+};
+
+/* enum wmi_nss_ratio - NSS ratio received from FW during service ready ext
+ *			event
+ * WMI_NSS_RATIO_1BY2_NSS -Max nss of 160MHz is equals to half of the max nss
+ *			   of 80MHz
+ * WMI_NSS_RATIO_3BY4_NSS - Max nss of 160MHz is equals to 3/4 of the max nss
+ *			    of 80MHz
+ * WMI_NSS_RATIO_1_NSS - Max nss of 160MHz is equals to the max nss of 80MHz
+ * WMI_NSS_RATIO_2_NSS - Max nss of 160MHz is equals to two times the max
+ *			 nss of 80MHz
+ */
+
+enum wmi_nss_ratio {
+	WMI_NSS_RATIO_1BY2_NSS = 0x0,
+	WMI_NSS_RATIO_3BY4_NSS = 0x1,
+	WMI_NSS_RATIO_1_NSS = 0x2,
+	WMI_NSS_RATIO_2_NSS = 0x3,
 };
 
 struct wmi_host_pdev_band_to_mac {
@@ -2224,6 +2282,8 @@ struct wmi_init_cmd {
 	struct wmi_abi_version host_abi_vers;
 	u32 num_host_mem_chunks;
 } __packed;
+
+#define WMI_RSRC_CFG_FLAG1_BSS_CHANNEL_INFO_64 BIT(5)
 
 struct wmi_resource_config {
 	u32 tlv_header;
@@ -2351,6 +2411,12 @@ struct wmi_hw_mode_capabilities {
 } __packed;
 
 #define WMI_MAX_HECAP_PHY_SIZE                 (3)
+#define WMI_NSS_RATIO_ENABLE_DISABLE_BITPOS    BIT(0)
+#define WMI_NSS_RATIO_ENABLE_DISABLE_GET(_val) \
+	FIELD_GET(WMI_NSS_RATIO_ENABLE_DISABLE_BITPOS, _val)
+#define WMI_NSS_RATIO_INFO_BITPOS              GENMASK(4, 1)
+#define WMI_NSS_RATIO_INFO_GET(_val) \
+	FIELD_GET(WMI_NSS_RATIO_INFO_BITPOS, _val)
 
 struct wmi_mac_phy_capabilities {
 	u32 hw_mode_id;
@@ -2384,6 +2450,12 @@ struct wmi_mac_phy_capabilities {
 	u32 he_cap_info_2g_ext;
 	u32 he_cap_info_5g_ext;
 	u32 he_cap_info_internal;
+	u32 wireless_modes;
+	u32 low_2ghz_chan_freq;
+	u32 high_2ghz_chan_freq;
+	u32 low_5ghz_chan_freq;
+	u32 high_5ghz_chan_freq;
+	u32 nss_ratio;
 } __packed;
 
 struct wmi_hal_reg_capabilities_ext {
@@ -2508,6 +2580,7 @@ struct wmi_vdev_down_cmd {
 #define WMI_VDEV_START_HIDDEN_SSID  BIT(0)
 #define WMI_VDEV_START_PMF_ENABLED  BIT(1)
 #define WMI_VDEV_START_LDPC_RX_ENABLED BIT(3)
+#define WMI_VDEV_START_HW_ENCRYPTION_DISABLED BIT(4)
 
 struct wmi_ssid {
 	u32 ssid_len;
@@ -2941,6 +3014,7 @@ struct wmi_pdev_bss_chan_info_req_cmd {
 	u32 tlv_header;
 	/* ref wmi_bss_chan_info_req_type */
 	u32 req_type;
+	u32 pdev_id;
 } __packed;
 
 struct wmi_ap_ps_peer_cmd {
@@ -3589,7 +3663,7 @@ struct wmi_stop_scan_cmd {
 struct scan_chan_list_params {
 	u32 pdev_id;
 	u16 nallchans;
-	struct channel_param ch_param[1];
+	struct channel_param ch_param[];
 };
 
 struct wmi_scan_chan_list_cmd {
@@ -3898,7 +3972,11 @@ struct wmi_vht_rate_set {
 
 struct wmi_he_rate_set {
 	u32 tlv_header;
+
+	/* MCS at which the peer can receive */
 	u32 rx_mcs_set;
+
+	/* MCS at which the peer can transmit */
 	u32 tx_mcs_set;
 } __packed;
 
@@ -4037,7 +4115,6 @@ struct wmi_vdev_stopped_event {
 } __packed;
 
 struct wmi_pdev_bss_chan_info_event {
-	u32 pdev_id;
 	u32 freq;	/* Units in MHz */
 	u32 noise_floor;	/* units are dBm */
 	/* rx clear - how often the channel was unused */
@@ -4055,6 +4132,7 @@ struct wmi_pdev_bss_chan_info_event {
 	/*rx_cycle cnt for my bss in 64bits format */
 	u32 rx_bss_cycle_count_low;
 	u32 rx_bss_cycle_count_high;
+	u32 pdev_id;
 } __packed;
 
 #define WMI_VDEV_INSTALL_KEY_COMPL_STATUS_SUCCESS 0
@@ -4149,14 +4227,19 @@ struct wmi_pdev_stats_tx {
 	/* Num underruns */
 	s32 underrun;
 
+	/* Num hw paused */
+	u32 hw_paused;
+
 	/* Num PPDUs cleaned up in TX abort */
 	s32 tx_abort;
 
-	/* Num MPDUs requed by SW */
-	s32 mpdus_requed;
+	/* Num MPDUs requeued by SW */
+	s32 mpdus_requeued;
 
 	/* excessive retries */
 	u32 tx_ko;
+
+	u32 tx_xretry;
 
 	/* data hw rate code */
 	u32 data_rc;
@@ -4187,6 +4270,40 @@ struct wmi_pdev_stats_tx {
 
 	/* MPDU is more than txop limit */
 	u32 txop_ovf;
+
+	/* Num sequences posted */
+	u32 seq_posted;
+
+	/* Num sequences failed in queueing */
+	u32 seq_failed_queueing;
+
+	/* Num sequences completed */
+	u32 seq_completed;
+
+	/* Num sequences restarted */
+	u32 seq_restarted;
+
+	/* Num of MU sequences posted */
+	u32 mu_seq_posted;
+
+	/* Num MPDUs flushed by SW, HWPAUSED, SW TXABORT
+	 * (Reset,channel change)
+	 */
+	s32 mpdus_sw_flush;
+
+	/* Num MPDUs filtered by HW, all filter condition (TTL expired) */
+	s32 mpdus_hw_filter;
+
+	/* Num MPDUs truncated by PDG (TXOP, TBTT,
+	 * PPDU_duration based on rate, dyn_bw)
+	 */
+	s32 mpdus_truncated;
+
+	/* Num MPDUs that was tried but didn't receive ACK or BA */
+	s32 mpdus_ack_failed;
+
+	/* Num MPDUs that was dropped du to expiry. */
+	s32 mpdus_expired;
 } __packed;
 
 struct wmi_pdev_stats_rx {
@@ -4221,6 +4338,9 @@ struct wmi_pdev_stats_rx {
 
 	/* Number of mpdu errors - FCS, MIC, ENC etc. */
 	s32 mpdu_errs;
+
+	/* Num overflow errors */
+	s32 rx_ovfl_errs;
 } __packed;
 
 struct wmi_pdev_stats {
@@ -4781,6 +4901,12 @@ struct wmi_obss_spatial_reuse_params_cmd {
 	u32 vdev_id;
 } __packed;
 
+struct wmi_pdev_obss_pd_bitmap_cmd {
+	u32 tlv_header;
+	u32 pdev_id;
+	u32 bitmap[2];
+} __packed;
+
 #define ATH11K_BSS_COLOR_COLLISION_SCAN_PERIOD_MS		200
 #define ATH11K_OBSS_COLOR_COLLISION_DETECTION_DISABLE		0
 #define ATH11K_OBSS_COLOR_COLLISION_DETECTION			1
@@ -4989,7 +5115,7 @@ struct target_resource_config {
 	u32 vo_minfree;
 	u32 rx_batchmode;
 	u32 tt_support;
-	u32 atf_config;
+	u32 flag1;
 	u32 iphdr_pad_config;
 	u32 qwrap_config:16,
 	    alloc_frag_desc_for_data_pkt:16;
@@ -5316,6 +5442,16 @@ int ath11k_wmi_send_twt_enable_cmd(struct ath11k *ar, u32 pdev_id);
 int ath11k_wmi_send_twt_disable_cmd(struct ath11k *ar, u32 pdev_id);
 int ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
 				 struct ieee80211_he_obss_pd *he_obss_pd);
+int ath11k_wmi_pdev_set_srg_bss_color_bitmap(struct ath11k *ar, u32 *bitmap);
+int ath11k_wmi_pdev_set_srg_patial_bssid_bitmap(struct ath11k *ar, u32 *bitmap);
+int ath11k_wmi_pdev_srg_obss_color_enable_bitmap(struct ath11k *ar,
+						 u32 *bitmap);
+int ath11k_wmi_pdev_srg_obss_bssid_enable_bitmap(struct ath11k *ar,
+						 u32 *bitmap);
+int ath11k_wmi_pdev_non_srg_obss_color_enable_bitmap(struct ath11k *ar,
+						     u32 *bitmap);
+int ath11k_wmi_pdev_non_srg_obss_bssid_enable_bitmap(struct ath11k *ar,
+						     u32 *bitmap);
 int ath11k_wmi_send_obss_color_collision_cfg_cmd(struct ath11k *ar, u32 vdev_id,
 						 u8 bss_color, u32 period,
 						 bool enable);
